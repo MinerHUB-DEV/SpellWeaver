@@ -6,6 +6,86 @@
   <title>Spellweaver: Elemental Survivor</title>
   <!-- Tailwind CSS v4 -->
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <!-- Firebase SDK (modular v10) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, collection, query, orderBy, limit, getDocs, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    // ⚠️ TODO: Replace these placeholder values with your actual Firebase config
+    // Get them from: https://console.firebase.google.com → Project Settings → Your apps → SDK setup
+    const firebaseConfig = {
+      apiKey: "AIzaSyAZcpzWjbLRfYMu4CXlyAo5yf-2aolyeoo",
+      authDomain: "spellweaver-f5ca2.firebaseapp.com",
+      databaseURL: "https://spellweaver-f5ca2-default-rtdb.firebaseio.com",
+      projectId: "spellweaver-f5ca2",
+      storageBucket: "spellweaver-f5ca2.firebasestorage.app",
+      messagingSenderId: "447615052860",
+      appId: "1:447615052860:web:d5b77a0492a43e8155a739",
+      measurementId: "G-Y7ENSE03DE"
+    };
+
+    // Detect placeholder config
+    const isFirebaseConfigured = !firebaseConfig.apiKey.includes("YOUR_") && !firebaseConfig.projectId.includes("YOUR_");
+
+    // Expose globals for game script
+    window.firebaseReady = false;
+    window.firebaseStatus = isFirebaseConfigured ? 'connecting' : 'not_configured';
+
+    if (isFirebaseConfigured) {
+      try {
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        window.firebaseDb = db;
+        window.firebaseReady = true;
+        window.firebaseStatus = 'connected';
+
+        // Helper: fetch top leaderboard entries sorted by a field
+        window.fbFetchLeaderboard = async function(sortField = 'level', topN = 25) {
+          try {
+            const q = query(collection(db, "leaderboard"), orderBy(sortField, "desc"), limit(topN));
+            const snap = await getDocs(q);
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          } catch (err) {
+            console.error("Leaderboard fetch failed:", err);
+            return null;
+          }
+        };
+
+        // Helper: submit/upsert an entry (keyed by player name)
+        window.fbSubmitEntry = async function(entry) {
+          try {
+            // Use lowercased+trimmed name as document ID (one entry per name)
+            const docId = (entry.name || 'anonymous').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 30);
+            const ref = doc(db, "leaderboard", docId);
+            const existing = await getDoc(ref);
+            let data = existing.exists() ? existing.data() : { wins: 0 };
+            // Keep best values
+            data.name = entry.name;
+            data.class = entry.class || data.class || 'pyro';
+            data.level = Math.max(data.level || 0, entry.level || 0);
+            data.xp = Math.max(data.xp || 0, entry.xp || 0);
+            data.kills = Math.max(data.kills || 0, entry.kills || 0);
+            data.score = Math.max(data.score || 0, entry.score || 0);
+            if (entry.win) data.wins = (data.wins || 0) + 1;
+            data.updatedAt = Date.now();
+            await setDoc(ref, data);
+            return true;
+          } catch (err) {
+            console.error("Leaderboard submit failed:", err);
+            return false;
+          }
+        };
+
+        console.log("🔥 Firebase connected — global leaderboards active!");
+      } catch (err) {
+        console.error("Firebase init failed:", err);
+        window.firebaseStatus = 'error';
+      }
+    } else {
+      console.warn("⚠️ Firebase not configured. Using local leaderboard fallback. Add your apiKey + projectId to enable global leaderboards.");
+    }
+  </script>
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -224,6 +304,9 @@
           </span>
         </div>
         <div class="flex gap-3">
+          <button id="btn-leaderboard" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
+            🏆 Leaderboard
+          </button>
           <button id="btn-how-to" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
             📖 How To Play
           </button>
@@ -246,9 +329,9 @@
         </p>
 
         <!-- CLASS SELECTION BOX -->
-        <div class="mt-8 w-full max-w-2xl">
+        <div class="mt-8 w-full max-w-5xl">
           <h3 class="font-display text-xs text-slate-400 tracking-widest uppercase mb-4 text-center">Choose Your Class</h3>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             
             <!-- Pyromancer -->
             <div id="class-pyro" class="class-card group glassmorphism hover:bg-red-950/20 hover:border-red-500/50 p-4 rounded-xl cursor-pointer transition duration-300 border border-slate-800 flex flex-col justify-between relative overflow-hidden" onclick="selectClass('pyro')">
@@ -298,6 +381,40 @@
               <div class="mt-4 pt-3 border-t border-slate-800/80 text-left">
                 <div class="text-[11px] text-slate-300"><strong class="text-purple-400">Weapon:</strong> Lightning Arc</div>
                 <div class="text-[11px] text-slate-300"><strong class="text-purple-400">Passive:</strong> +20% Cooldown Reduction</div>
+              </div>
+            </div>
+
+            <!-- Wind Dancer -->
+            <div id="class-wind" class="class-card group glassmorphism hover:bg-emerald-950/20 hover:border-emerald-500/50 p-4 rounded-xl cursor-pointer transition duration-300 border border-slate-800 flex flex-col justify-between relative overflow-hidden" onclick="selectClass('wind')">
+              <div class="absolute -right-6 -top-6 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all"></div>
+              <div>
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-2xl">🌪️</span>
+                  <span class="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-display font-bold">SWIFT</span>
+                </div>
+                <h4 class="font-display font-bold text-lg text-emerald-400 group-hover:text-emerald-300 transition">Wind Dancer</h4>
+                <p class="text-slate-400 text-xs mt-1">Ride the gales. Insanely fast with whirling tornado spells.</p>
+              </div>
+              <div class="mt-4 pt-3 border-t border-slate-800/80 text-left">
+                <div class="text-[11px] text-slate-300"><strong class="text-emerald-400">Weapon:</strong> Tornado</div>
+                <div class="text-[11px] text-slate-300"><strong class="text-emerald-400">Passive:</strong> +30% Movement Speed</div>
+              </div>
+            </div>
+
+            <!-- Water Sage -->
+            <div id="class-water" class="class-card group glassmorphism hover:bg-blue-950/20 hover:border-blue-500/50 p-4 rounded-xl cursor-pointer transition duration-300 border border-slate-800 flex flex-col justify-between relative overflow-hidden" onclick="selectClass('water')">
+              <div class="absolute -right-6 -top-6 w-20 h-20 bg-blue-500/10 rounded-full blur-xl group-hover:bg-blue-500/20 transition-all"></div>
+              <div>
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-2xl">💧</span>
+                  <span class="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded font-display font-bold">SUSTAIN</span>
+                </div>
+                <h4 class="font-display font-bold text-lg text-blue-400 group-hover:text-blue-300 transition">Water Sage</h4>
+                <p class="text-slate-400 text-xs mt-1">Flow like water. Healing aura and tidal wave attacks.</p>
+              </div>
+              <div class="mt-4 pt-3 border-t border-slate-800/80 text-left">
+                <div class="text-[11px] text-slate-300"><strong class="text-blue-400">Weapon:</strong> Tidal Wave</div>
+                <div class="text-[11px] text-slate-300"><strong class="text-blue-400">Passive:</strong> Auto +1 HP/sec regen</div>
               </div>
             </div>
 
@@ -746,6 +863,92 @@
         <button id="btn-return-menu" class="flex-1 py-4 bg-slate-900 hover:bg-slate-850 text-slate-300 font-display font-semibold border border-slate-800 rounded-xl tracking-wider text-sm hover:scale-105 active:scale-95 transition cursor-pointer">
           🚪 MENU MAIN GRIMOIRE
         </button>
+      </div>
+    </div>
+
+    <!-- 8. VICTORY SCREEN (BEAT THE GAME) -->
+    <div id="screen-victory" class="hidden absolute inset-0 bg-gradient-to-br from-amber-950/60 via-purple-950/60 to-indigo-950/60 backdrop-blur-md z-40 flex flex-col justify-center items-center p-4 overflow-y-auto">
+      <div class="text-center mb-6 max-w-md">
+        <span class="text-7xl inline-block mb-2 animate-bounce">👑</span>
+        <h2 class="font-fantasy text-5xl md:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 drop-shadow-[0_4px_20px_rgba(245,158,11,0.6)] shimmer-text">
+          VICTORY!
+        </h2>
+        <p class="text-amber-200 text-sm mt-2 font-display tracking-widest">YOU HAVE BECOME THE GRAND ARCH-MAGE</p>
+        <p class="text-slate-300 text-xs sm:text-sm mt-3 max-w-sm mx-auto">You vanquished the 10 Abyssal Reapers and conquered all 50 waves of the eternal storm. Your name shall echo in the Grimoire forever.</p>
+      </div>
+
+      <div class="glassmorphism w-full max-w-xl p-6 rounded-2xl border border-amber-500/30 mb-6 flex flex-col gap-4 shadow-[0_0_50px_rgba(245,158,11,0.15)]">
+        <h3 class="font-display text-sm text-center text-amber-300 font-bold uppercase tracking-wider border-b border-amber-900/30 pb-2.5">🏆 Triumph Records</h3>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="flex flex-col p-3 bg-slate-950/40 border border-amber-900/30 rounded-xl text-center">
+            <span class="text-[10px] text-slate-500 uppercase font-semibold">Final Score</span>
+            <span id="vic-stat-score" class="font-display text-2xl font-black text-yellow-400 mt-1">0</span>
+          </div>
+          <div class="flex flex-col p-3 bg-slate-950/40 border border-amber-900/30 rounded-xl text-center">
+            <span class="text-[10px] text-slate-500 uppercase font-semibold">Time to Victory</span>
+            <span id="vic-stat-time" class="font-display text-2xl font-black text-cyan-400 mt-1">00:00</span>
+          </div>
+          <div class="flex flex-col p-3 bg-slate-950/40 border border-amber-900/30 rounded-xl text-center">
+            <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Kills</span>
+            <span id="vic-stat-kills" class="font-display text-2xl font-black text-rose-400 mt-1">0</span>
+          </div>
+          <div class="flex flex-col p-3 bg-slate-950/40 border border-amber-900/30 rounded-xl text-center">
+            <span class="text-[10px] text-slate-500 uppercase font-semibold">Total Wins</span>
+            <span id="vic-stat-wins" class="font-display text-2xl font-black text-amber-400 mt-1">1</span>
+          </div>
+        </div>
+        <div class="bg-slate-900/50 p-3 rounded-xl border border-amber-900/30 flex justify-between items-center text-xs">
+          <span class="text-slate-400 font-display">Final Class & Level:</span>
+          <span class="font-display font-extrabold text-amber-300" id="vic-stat-class">Pyromancer LV.20</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-4 w-full max-w-xl px-4 justify-center">
+        <button id="btn-victory-replay" class="flex-1 py-4 bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-500 text-white font-display font-black tracking-widest text-sm rounded-xl hover:scale-105 active:scale-95 transition cursor-pointer shadow-lg shadow-amber-500/20">
+          ⚔️ PLAY AGAIN
+        </button>
+        <button id="btn-victory-menu" class="flex-1 py-4 bg-slate-900 hover:bg-slate-850 text-slate-300 font-display font-semibold border border-slate-800 rounded-xl tracking-wider text-sm hover:scale-105 active:scale-95 transition cursor-pointer">
+          🚪 RETURN TO MENU
+        </button>
+      </div>
+    </div>
+
+    <!-- 9. LEADERBOARD MODAL -->
+    <div id="modal-leaderboard" class="hidden absolute inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+      <div class="glassmorphism w-full max-w-3xl rounded-2xl p-5 border border-amber-500/30 flex flex-col gap-4 max-h-[92vh] overflow-y-auto shadow-[0_0_40px_rgba(245,158,11,0.12)]">
+        <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+          <h3 class="font-display font-bold text-lg text-amber-400 flex items-center gap-2">🏆 Global Leaderboard</h3>
+          <button id="btn-close-leaderboard" class="text-slate-400 hover:text-white transition cursor-pointer text-xl">✕</button>
+        </div>
+
+        <p class="text-[11px] text-slate-500 text-center -mt-1">Compete against the world's most legendary Spellweavers</p>
+
+        <!-- Live status banner -->
+        <div id="leaderboard-status" class="text-[10px] text-center font-display tracking-wider py-1.5 bg-slate-900/40 border border-slate-800/40 rounded">⏳ Connecting...</div>
+
+        <!-- Tabs -->
+        <div class="flex gap-1 p-1 bg-slate-900/60 rounded-lg border border-slate-800">
+          <button class="lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition" data-tab="level">🌟 Highest Level</button>
+          <button class="lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition" data-tab="wins">👑 Most Wins</button>
+          <button class="lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition" data-tab="xp">✨ Highest XP</button>
+          <button class="lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition" data-tab="kills">💀 Most Kills</button>
+        </div>
+
+        <!-- Player name input -->
+        <div class="flex gap-2 items-center bg-slate-900/40 p-2 rounded-lg border border-slate-800">
+          <span class="text-xs text-slate-400 font-display">Your Mage Name:</span>
+          <input id="leaderboard-name" type="text" maxlength="14" placeholder="Anonymous" class="flex-1 bg-slate-950 text-amber-300 text-xs border border-slate-700 rounded p-1.5 px-2 font-display outline-none focus:border-amber-500" />
+          <button id="btn-save-name" class="text-[10px] font-display font-bold px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded transition cursor-pointer">SAVE</button>
+        </div>
+
+        <!-- Leaderboard list -->
+        <div id="leaderboard-list" class="flex flex-col gap-1.5 max-h-96 overflow-y-auto">
+          <!-- Filled dynamically -->
+        </div>
+
+        <div class="text-[10px] text-slate-500 text-center pt-2 border-t border-slate-800/60">
+          Your scores are saved locally and ranked alongside legendary mages from the realm.
+        </div>
       </div>
     </div>
 
@@ -1335,6 +1538,23 @@
         cooldownMult: 0.80, // 20% Cooldown reduction starting
         magnetRange: 130,
         startingSpell: 'lightning'
+      },
+      wind: {
+        maxHp: 85,
+        speed: 4.4, // +30% movement speed
+        damageMult: 0.95,
+        cooldownMult: 0.95,
+        magnetRange: 150,
+        startingSpell: 'tornado'
+      },
+      water: {
+        maxHp: 120,
+        speed: 3.0,
+        damageMult: 1.0,
+        cooldownMult: 1.0,
+        magnetRange: 130,
+        startingSpell: 'tidal',
+        autoRegen: 1 // Auto +1 HP/sec
       }
     };
 
@@ -1424,6 +1644,42 @@
           'Spawns 2 gravity vortexes instead of 1',
           'Vortex implodes violently on expiration, dealing 150 burst damage!'
         ]
+      },
+      tornado: {
+        name: '🌪️ Tornado',
+        level: 0,
+        maxLevel: 5,
+        cooldown: 1600,
+        lastCast: 0,
+        speed: 4,
+        size: 18,
+        damage: 18,
+        desc: 'Summons spinning whirlwinds that travel forward, ticking damage on enemies caught in their swirl.',
+        levelUpgrades: [
+          'Unlocks a swirling tornado that drags enemies',
+          'Tornado size increased & duration extended',
+          'Fires 2 tornados in a wide spread',
+          'Damage per tick increased by 40%',
+          'Unleashes 4 tornados in cardinal directions!'
+        ]
+      },
+      tidal: {
+        name: '💧 Tidal Wave',
+        level: 0,
+        maxLevel: 5,
+        cooldown: 1500,
+        lastCast: 0,
+        speed: 6,
+        size: 14,
+        damage: 28,
+        desc: 'Releases an expanding water ring that knocks back enemies and pierces through everything.',
+        levelUpgrades: [
+          'Unlocks a piercing water wave projectile',
+          'Wave size +30% and stronger knockback',
+          'Fires 2 waves in opposite directions',
+          'Damage increased by 35%',
+          'Releases a full radial 4-wave burst around you!'
+        ]
       }
     };
 
@@ -1458,6 +1714,19 @@
         // Auto-unlock starting weapon
         const startSpell = base.startingSpell;
         this.spells[startSpell] = 1; // Unlocked level 1
+
+        // Water Sage auto-regen
+        if (base.autoRegen) {
+          this.hpRegen = base.autoRegen;
+          this.hpRegenActive = true;
+          if (this._regenInterval) clearInterval(this._regenInterval);
+          this._regenInterval = setInterval(() => {
+            if (gameState.active && !gameState.paused && this.hp < this.maxHp) {
+              this.hp = Math.min(this.maxHp, this.hp + this.hpRegen);
+              updateHUD();
+            }
+          }, 1000);
+        }
 
         // Dash mechanic
         this.dashCooldown = 0; // ms remaining
@@ -1884,6 +2153,45 @@
             }
             break;
           }
+          case 'tornado': {
+            playSound('lightning');
+            const count = level === 5 ? 4 : (level >= 3 ? 2 : 1);
+            const spread = level === 5 ? Math.PI / 2 : 0.3;
+            const sz = baseDef.size + (level * 3);
+            const dur = 120 + (level >= 2 ? 60 : 0);
+            const dmg = baseDef.damage * this.damageMult * (1 + (level - 1) * 0.4);
+            
+            for (let i = 0; i < count; i++) {
+              let angle = targetAngle;
+              if (count === 2) angle = targetAngle + (i === 0 ? -spread : spread);
+              if (count === 4) angle = targetAngle + (i * spread);
+              const vx = Math.cos(angle) * baseDef.speed;
+              const vy = Math.sin(angle) * baseDef.speed;
+              gameState.projectiles.push(new Projectile(
+                this.x, this.y, vx, vy, dmg, sz, '#34d399', 'tornado', level, dur
+              ));
+            }
+            break;
+          }
+          case 'tidal': {
+            playSound('ice');
+            const count = level === 5 ? 4 : (level >= 3 ? 2 : 1);
+            const sz = baseDef.size * (1 + (level >= 2 ? 0.3 : 0));
+            const dmg = baseDef.damage * this.damageMult * (1 + (level - 1) * 0.35);
+            const knockback = 25 + (level >= 2 ? 15 : 0);
+            
+            for (let i = 0; i < count; i++) {
+              let angle = targetAngle;
+              if (count === 2) angle = targetAngle + (i === 0 ? 0 : Math.PI); // opposite directions
+              if (count === 4) angle = targetAngle + (i * Math.PI / 2); // 4 cardinal
+              const vx = Math.cos(angle) * baseDef.speed;
+              const vy = Math.sin(angle) * baseDef.speed;
+              gameState.projectiles.push(new Projectile(
+                this.x, this.y, vx, vy, dmg, sz, '#60a5fa', 'tidal', level, 80, knockback
+              ));
+            }
+            break;
+          }
         }
       }
 
@@ -2041,6 +2349,43 @@
           ctx.beginPath();
           ctx.arc(this.x, this.y, outerR, 0, Math.PI * 2);
           ctx.fill();
+        } else if (this.type === 'tornado') {
+          // Spinning swirl - 3 rotating arc segments
+          const rot = Date.now() * 0.02;
+          ctx.globalAlpha = 0.4;
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.85;
+          ctx.strokeStyle = '#ecfdf5';
+          ctx.lineWidth = 3;
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size * (0.4 + i * 0.3), rot + i, rot + i + Math.PI * 1.2);
+            ctx.stroke();
+          }
+        } else if (this.type === 'tidal') {
+          // Expanding water ring
+          const lifeRatio = this.life / this.maxLife;
+          ctx.globalAlpha = 0.5 * lifeRatio + 0.4;
+          ctx.strokeStyle = this.color;
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.stroke();
+          // Inner glow
+          ctx.fillStyle = this.color;
+          ctx.globalAlpha = 0.25;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size * 0.75, 0, Math.PI * 2);
+          ctx.fill();
+          // White hot foam center
+          ctx.globalAlpha = 0.7;
+          ctx.fillStyle = '#dbeafe';
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size * 0.3, 0, Math.PI * 2);
+          ctx.fill();
         } else {
           // Standard circular projectile
           ctx.fillStyle = this.color;
@@ -2082,6 +2427,35 @@
           } else {
             this.hasHit = true;
           }
+        } else if (this.type === 'tornado') {
+          // Tornado: ticks damage on every contact but doesn't get destroyed (persistent whirl)
+          if (!this.hitTracker) this.hitTracker = new Map();
+          const last = this.hitTracker.get(enemy) || 0;
+          // Damage same enemy at most every 15 frames
+          if (Date.now() - last > 250) {
+            enemy.takeDamage(this.damage, '#34d399');
+            this.hitTracker.set(enemy, Date.now());
+            // Pull enemy slightly inward
+            const angle = Math.atan2(this.y - enemy.y, this.x - enemy.x);
+            enemy.x += Math.cos(angle) * 4;
+            enemy.y += Math.sin(angle) * 4;
+            spawnParticles(enemy.x, enemy.y, '#a7f3d0', 4, 2, 15, 2);
+          }
+          // Tornado is persistent (does NOT set hasHit)
+        } else if (this.type === 'tidal') {
+          // Tidal wave: pierces all enemies, applies knockback
+          if (!this.hitTracker) this.hitTracker = new Set();
+          if (!this.hitTracker.has(enemy)) {
+            enemy.takeDamage(this.damage, '#60a5fa');
+            this.hitTracker.add(enemy);
+            // Knockback in projectile travel direction
+            const knockback = this.extraParam || 25;
+            const speed = Math.hypot(this.vx, this.vy) || 1;
+            enemy.x += (this.vx / speed) * knockback;
+            enemy.y += (this.vy / speed) * knockback;
+            spawnParticles(enemy.x, enemy.y, '#bfdbfe', 8, 3, 20, 2);
+          }
+          // Wave pierces (does NOT set hasHit)
         }
       }
     }
@@ -2652,17 +3026,26 @@
       
       // Remove visual selected border from cards
       document.querySelectorAll('.class-card').forEach(card => {
-        card.classList.remove('border-purple-500', 'border-red-500', 'border-cyan-500', 'glow-storm', 'glow-fire', 'glow-ice');
+        card.classList.remove(
+          'border-purple-500', 'border-red-500', 'border-cyan-500',
+          'border-emerald-500', 'border-blue-500',
+          'glow-storm', 'glow-fire', 'glow-ice'
+        );
       });
 
       // Highlight active card
       const activeCard = document.getElementById(`class-${className}`);
+      if (!activeCard) return;
       if (className === 'pyro') {
         activeCard.classList.add('border-red-500', 'glow-fire');
       } else if (className === 'cryo') {
         activeCard.classList.add('border-cyan-500', 'glow-ice');
-      } else {
+      } else if (className === 'storm') {
         activeCard.classList.add('border-purple-500', 'glow-storm');
+      } else if (className === 'wind') {
+        activeCard.classList.add('border-emerald-500');
+      } else if (className === 'water') {
+        activeCard.classList.add('border-blue-500');
       }
     }
     // Select pyro as default first load
@@ -2738,6 +3121,201 @@
       document.getElementById('screen-menu').classList.remove('hidden');
     });
 
+    // VICTORY screen button bindings
+    document.getElementById('btn-victory-replay').addEventListener('click', () => {
+      document.getElementById('screen-victory').classList.add('hidden');
+      document.getElementById('screen-menu').classList.add('hidden');
+      document.getElementById('screen-game').classList.remove('hidden');
+      startGame();
+    });
+    document.getElementById('btn-victory-menu').addEventListener('click', () => {
+      document.getElementById('screen-victory').classList.add('hidden');
+      document.getElementById('screen-game').classList.add('hidden');
+      document.getElementById('screen-menu').classList.remove('hidden');
+    });
+
+    // ===================== LEADERBOARD SYSTEM =====================
+    let currentLbTab = 'level';
+
+    function getLeaderboard() {
+      try {
+        return JSON.parse(localStorage.getItem('spellweaver_leaderboard')) || seedLeaderboard();
+      } catch {
+        return seedLeaderboard();
+      }
+    }
+
+    // Seed with fake legendary mages so it's not empty
+    function seedLeaderboard() {
+      const seedNames = [
+        { name: 'ArchLich_Vex', class: 'storm', level: 28, xp: 18420, kills: 2150, wins: 7 },
+        { name: 'EmberKnight', class: 'pyro', level: 25, xp: 15330, kills: 1830, wins: 5 },
+        { name: 'FrostQueen99', class: 'cryo', level: 24, xp: 14210, kills: 1740, wins: 4 },
+        { name: 'StormcallerX', class: 'storm', level: 22, xp: 13050, kills: 1620, wins: 3 },
+        { name: 'TideMaster', class: 'water', level: 21, xp: 12480, kills: 1510, wins: 3 },
+        { name: 'GaleRider', class: 'wind', level: 20, xp: 11200, kills: 1380, wins: 2 },
+        { name: 'PyroRogue', class: 'pyro', level: 18, xp: 9850, kills: 1190, wins: 2 },
+        { name: 'IceShard_77', class: 'cryo', level: 17, xp: 9100, kills: 1080, wins: 1 },
+        { name: 'VoidWalker', class: 'storm', level: 15, xp: 7820, kills: 950, wins: 1 },
+        { name: 'WindChaser', class: 'wind', level: 14, xp: 7100, kills: 880, wins: 1 },
+        { name: 'AquaSage_42', class: 'water', level: 13, xp: 6450, kills: 780, wins: 1 },
+        { name: 'CinderSorc', class: 'pyro', level: 12, xp: 5900, kills: 710, wins: 0 }
+      ];
+      localStorage.setItem('spellweaver_leaderboard', JSON.stringify(seedNames));
+      return seedNames;
+    }
+
+    async function submitToLeaderboard(stats) {
+      const playerName = localStorage.getItem('spellweaver_playername') || 'Anonymous';
+      const entry = {
+        name: playerName,
+        class: stats.class,
+        level: stats.level || 0,
+        xp: stats.xp || 0,
+        kills: stats.kills || 0,
+        score: stats.score || 0,
+        win: !!stats.win
+      };
+
+      // Try Firebase first
+      if (window.firebaseReady && window.fbSubmitEntry) {
+        const ok = await window.fbSubmitEntry(entry);
+        if (ok) return;
+      }
+
+      // Local fallback (also keeps your local entry)
+      const board = getLeaderboard();
+      let local = board.find(e => e.name === playerName);
+      if (!local) {
+        local = { name: playerName, class: entry.class, level: 0, xp: 0, kills: 0, wins: 0 };
+        board.push(local);
+      }
+      local.level = Math.max(local.level, entry.level);
+      local.xp = Math.max(local.xp, entry.xp);
+      local.kills = Math.max(local.kills, entry.kills);
+      local.class = entry.class || local.class;
+      if (stats.win) local.wins = (local.wins || 0) + 1;
+      localStorage.setItem('spellweaver_leaderboard', JSON.stringify(board));
+    }
+
+    async function renderLeaderboard() {
+      const list = document.getElementById('leaderboard-list');
+      const playerName = localStorage.getItem('spellweaver_playername') || 'Anonymous';
+      const sortKey = currentLbTab; // 'level', 'wins', 'xp', 'kills'
+
+      // Show loading shimmer while fetching
+      list.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs font-display animate-pulse">Loading global rankings...</div>`;
+
+      let entries = null;
+      let isGlobal = false;
+
+      // Try Firebase first
+      if (window.firebaseReady && window.fbFetchLeaderboard) {
+        entries = await window.fbFetchLeaderboard(sortKey, 25);
+        if (entries) isGlobal = true;
+      }
+
+      // Fallback to local
+      if (!entries) {
+        const board = getLeaderboard();
+        entries = [...board].sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0)).slice(0, 25);
+      }
+
+      // Status banner about firebase state
+      const statusBanner = document.getElementById('leaderboard-status');
+      if (statusBanner) {
+        if (isGlobal) {
+          statusBanner.innerHTML = `<span class="text-emerald-400">🌐 LIVE GLOBAL</span> — competing with players worldwide`;
+          statusBanner.className = 'text-[10px] text-center font-display tracking-wider py-1.5 bg-emerald-950/30 border border-emerald-800/30 rounded';
+        } else if (window.firebaseStatus === 'error') {
+          statusBanner.innerHTML = `<span class="text-rose-400">⚠️ FIREBASE ERROR</span> — using local fallback`;
+          statusBanner.className = 'text-[10px] text-center font-display tracking-wider py-1.5 bg-rose-950/30 border border-rose-800/30 rounded';
+        } else if (window.firebaseStatus === 'not_configured') {
+          statusBanner.innerHTML = `<span class="text-amber-400">📁 LOCAL ONLY</span> — add Firebase config for global rankings`;
+          statusBanner.className = 'text-[10px] text-center font-display tracking-wider py-1.5 bg-amber-950/30 border border-amber-800/30 rounded';
+        } else {
+          statusBanner.innerHTML = `<span class="text-slate-400">⏳ Connecting...</span>`;
+          statusBanner.className = 'text-[10px] text-center font-display tracking-wider py-1.5 bg-slate-900/40 border border-slate-800/40 rounded';
+        }
+      }
+
+      const classIcons = { pyro: '🔥', cryo: '❄️', storm: '⚡', wind: '🌪️', water: '💧' };
+      const classColors = { pyro: 'text-red-400', cryo: 'text-cyan-400', storm: 'text-purple-400', wind: 'text-emerald-400', water: 'text-blue-400' };
+      const tabLabels = { level: 'LV', wins: 'WINS', xp: 'XP', kills: 'KILLS' };
+
+      list.innerHTML = '';
+      if (entries.length === 0) {
+        list.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs font-display">No entries yet. Be the first legend!</div>`;
+        return;
+      }
+
+      entries.forEach((entry, idx) => {
+        const isYou = entry.name === playerName;
+        const rank = idx + 1;
+        const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
+        const value = (entry[sortKey] || 0).toLocaleString();
+
+        const row = document.createElement('div');
+        row.className = `flex items-center gap-3 p-2.5 rounded-lg border ${isYou ? 'bg-amber-950/30 border-amber-500/40' : 'bg-slate-900/40 border-slate-800/60'} text-xs`;
+        row.innerHTML = `
+          <div class="w-10 font-display font-extrabold text-base text-center ${rank <= 3 ? 'text-amber-300' : 'text-slate-500'}">${medal}</div>
+          <div class="text-xl">${classIcons[entry.class] || '🔮'}</div>
+          <div class="flex-1 min-w-0">
+            <div class="font-display font-bold text-sm ${isYou ? 'text-amber-200' : 'text-slate-200'} truncate">${entry.name}${isYou ? ' <span class="text-[9px] text-amber-400">(YOU)</span>' : ''}</div>
+            <div class="text-[10px] ${classColors[entry.class] || 'text-slate-400'} uppercase tracking-wider">${entry.class || 'mage'}</div>
+          </div>
+          <div class="text-right">
+            <div class="font-display font-black text-lg text-amber-400">${value}</div>
+            <div class="text-[9px] text-slate-500 uppercase">${tabLabels[sortKey]}</div>
+          </div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    function openLeaderboard() {
+      const savedName = localStorage.getItem('spellweaver_playername') || '';
+      document.getElementById('leaderboard-name').value = savedName;
+      setLbTab('level');
+      document.getElementById('modal-leaderboard').classList.remove('hidden');
+    }
+
+    async function setLbTab(tab) {
+      currentLbTab = tab;
+      // Update tab visual states
+      document.querySelectorAll('.lb-tab').forEach(btn => {
+        if (btn.dataset.tab === tab) {
+          btn.className = 'lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition bg-amber-600/30 text-amber-200 border border-amber-500/40';
+        } else {
+          btn.className = 'lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition text-slate-400 hover:text-slate-200 hover:bg-slate-800/50';
+        }
+      });
+      await renderLeaderboard();
+    }
+
+    // Bindings
+    document.getElementById('btn-leaderboard').addEventListener('click', openLeaderboard);
+    document.getElementById('btn-close-leaderboard').addEventListener('click', () => {
+      document.getElementById('modal-leaderboard').classList.add('hidden');
+    });
+    document.querySelectorAll('.lb-tab').forEach(btn => {
+      btn.addEventListener('click', () => setLbTab(btn.dataset.tab));
+    });
+    document.getElementById('btn-save-name').addEventListener('click', () => {
+      const name = document.getElementById('leaderboard-name').value.trim() || 'Anonymous';
+      localStorage.setItem('spellweaver_playername', name);
+      // Visual confirmation
+      const btn = document.getElementById('btn-save-name');
+      const orig = btn.textContent;
+      btn.textContent = '✓ SAVED';
+      btn.classList.add('bg-emerald-500');
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.classList.remove('bg-emerald-500');
+      }, 1200);
+      renderLeaderboard();
+    });
+
     // Keyboard controls listeners
     window.addEventListener('keydown', (e) => {
       if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') gameState.input.up = true;
@@ -2751,7 +3329,31 @@
           pauseGame();
         }
       }
+
+      // SPACE = Dash
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        if (gameState.active && !gameState.paused && gameState.player) {
+          gameState.player.tryDash();
+        }
+      }
     });
+
+    // Mobile dash button binding
+    const dashBtnEl = document.getElementById('btn-dash');
+    if (dashBtnEl) {
+      dashBtnEl.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (gameState.active && !gameState.paused && gameState.player) {
+          gameState.player.tryDash();
+        }
+      }, { passive: false });
+      dashBtnEl.addEventListener('click', (e) => {
+        if (gameState.active && !gameState.paused && gameState.player) {
+          gameState.player.tryDash();
+        }
+      });
+    }
 
     window.addEventListener('keyup', (e) => {
       if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') gameState.input.up = false;
@@ -2852,6 +3454,8 @@
       spellRegistry.fireball.level = gameState.classSelected === 'pyro' ? 1 : 0;
       spellRegistry.ice.level = gameState.classSelected === 'cryo' ? 1 : 0;
       spellRegistry.lightning.level = gameState.classSelected === 'storm' ? 1 : 0;
+      spellRegistry.tornado.level = gameState.classSelected === 'wind' ? 1 : 0;
+      spellRegistry.tidal.level = gameState.classSelected === 'water' ? 1 : 0;
       spellRegistry.shield.level = 0;
       spellRegistry.singularity.level = 0;
 
@@ -2868,6 +3472,13 @@
       gameState.gems = [];
       gameState.particles = [];
       gameState.floatingTexts = [];
+      gameState.combo = 0;
+      gameState.comboTimer = 0;
+      gameState.activeBoss = null;
+      gameState.finalWaveTriggered = false;
+      gameState.victoryAchieved = false;
+      gameState.bossesSpawned = 0;
+      gameState.bossesDefeated = 0;
 
       // Create new Player Mage
       gameState.player = new Player(0, 0, gameState.classSelected);
@@ -2888,11 +3499,16 @@
         if (!gameState.paused) {
           gameState.time++;
           
-          // Wave trigger increments every 45 seconds
-          if (gameState.time - gameState.lastWaveTime >= 45) {
+          // Wave trigger increments every 45 seconds (CAP at WAVE 50)
+          if (gameState.wave < 50 && gameState.time - gameState.lastWaveTime >= 45) {
             gameState.wave++;
             gameState.lastWaveTime = gameState.time;
             spawnWaveBanner();
+
+            // === FINAL WAVE: spawn 10 BOSSES ===
+            if (gameState.wave === 50) {
+              triggerFinalWave();
+            }
           }
 
           // Periodically spawn custom special objects inside map
@@ -2906,9 +3522,18 @@
             gameState.gems.push(new Gem(px, py, reward));
           }
 
-          // Periodic boss summon every 90 seconds
-          if (gameState.time % 90 === 0) {
+          // Periodic boss summon every 90 seconds (NOT during final wave)
+          if (gameState.wave < 50 && gameState.time % 90 === 0 && gameState.time > 0) {
             spawnBoss();
+          }
+          
+          // Detect VICTORY: final wave triggered AND no bosses remaining
+          if (gameState.finalWaveTriggered && !gameState.victoryAchieved) {
+            const bossesAlive = gameState.enemies.filter(e => e.isBoss).length;
+            if (bossesAlive === 0 && gameState.bossesSpawned >= 10) {
+              gameState.victoryAchieved = true;
+              triggerVictory();
+            }
           }
 
           // Format UI ticker
@@ -2950,6 +3575,18 @@
     function endGame() {
       stopGame();
       playSound('gameover');
+
+      // Submit run stats to leaderboard (no win bonus on death)
+      if (gameState.player) {
+        submitToLeaderboard({
+          win: false,
+          level: gameState.player.level,
+          xp: gameState.player.xp + (gameState.player.level * 100),
+          kills: gameState.kills,
+          score: gameState.score,
+          class: gameState.classSelected
+        });
+      }
 
       // Update Local storage high scores
       let isNewHigh = false;
@@ -3067,14 +3704,113 @@
 
     function spawnWaveBanner() {
       // Flash glowing wave update notification text
+      const msg = gameState.wave === 50
+        ? `👑 FINAL WAVE 50! 10 ABYSSAL REAPERS APPROACH!`
+        : `🔱 WAVE ${gameState.wave} ARRIVES! HORDE SCALE INCREASED!`;
       gameState.floatingTexts.push(new FloatingText(
         gameState.player.x, 
         gameState.player.y - 40, 
-        `🔱 WAVE ${gameState.wave} ARRIVES! HORDE SCALE INCREASED!`, 
-        '#f43f5e', 
+        msg,
+        gameState.wave === 50 ? '#fbbf24' : '#f43f5e', 
         true
       ));
       playSound('levelup');
+    }
+
+    // === FINAL WAVE: spawn 10 bosses dramatically over a few seconds ===
+    function triggerFinalWave() {
+      gameState.finalWaveTriggered = true;
+      gameState.bossesSpawned = 0;
+      camera.shakeIntensity = 30;
+      flashScreen();
+      
+      // Show big warning banner permanently (until victory)
+      const warnEl = document.getElementById('hud-boss-warning');
+      warnEl.classList.remove('hidden');
+      warnEl.innerHTML = `
+        <span class="text-xl">👑</span>
+        <div>
+          <p class="font-display font-extrabold text-sm tracking-widest text-amber-400">FINAL CONFRONTATION: 10 ABYSSAL REAPERS</p>
+          <p class="text-[10px] text-slate-300">Defeat them ALL to claim VICTORY!</p>
+        </div>
+      `;
+      clearTimeout(window._bossWarnTimeout);
+      window._bossWarnTimeout = setTimeout(() => {
+        warnEl.classList.add('hidden');
+      }, 5000);
+      
+      // Spawn 10 bosses, one per second, around the player
+      let spawnCount = 0;
+      const spawnInterval = setInterval(() => {
+        if (!gameState.active || gameState.victoryAchieved) {
+          clearInterval(spawnInterval);
+          return;
+        }
+        if (spawnCount >= 10) {
+          clearInterval(spawnInterval);
+          return;
+        }
+        const p = gameState.player;
+        const angle = (spawnCount / 10) * Math.PI * 2 + Math.random() * 0.4;
+        const bx = p.x + Math.cos(angle) * 600;
+        const by = p.y + Math.sin(angle) * 600;
+        const boss = new Enemy(bx, by, 'boss');
+        // Slightly weaken final-wave bosses since there are 10 of them
+        boss.hp = boss.maxHp = boss.maxHp * 0.45;
+        gameState.enemies.push(boss);
+        gameState.activeBoss = boss; // last spawned tracked for HP bar
+        document.getElementById('boss-hp-container').classList.remove('hidden');
+        gameState.bossesSpawned++;
+        spawnCount++;
+        playSound('hit');
+        camera.shakeIntensity = 15;
+      }, 1200);
+    }
+
+    // === VICTORY ===
+    function triggerVictory() {
+      stopGame();
+      
+      // Update leaderboard with final stats
+      submitToLeaderboard({
+        win: true,
+        level: gameState.player.level,
+        xp: gameState.player.xp + (gameState.player.level * 100),
+        kills: gameState.kills,
+        score: gameState.score,
+        class: gameState.classSelected
+      });
+      
+      // Increment global wins counter
+      const totalWins = (parseInt(localStorage.getItem('spellweaver_totalwins')) || 0) + 1;
+      localStorage.setItem('spellweaver_totalwins', totalWins);
+      
+      // Populate victory screen
+      const mins = Math.floor(gameState.time / 60).toString().padStart(2, '0');
+      const secs = (gameState.time % 60).toString().padStart(2, '0');
+      document.getElementById('vic-stat-score').textContent = gameState.score.toLocaleString();
+      document.getElementById('vic-stat-time').textContent = `${mins}:${secs}`;
+      document.getElementById('vic-stat-kills').textContent = gameState.kills;
+      document.getElementById('vic-stat-wins').textContent = totalWins;
+      
+      const classNames = { pyro: 'Pyromancer', cryo: 'Cryomancer', storm: 'Stormweaver', wind: 'Wind Dancer', water: 'Water Sage' };
+      document.getElementById('vic-stat-class').textContent = `${classNames[gameState.classSelected]} LV.${gameState.player.level}`;
+      
+      // Massive victory celebration particles
+      for (let i = 0; i < 100; i++) {
+        spawnParticles(
+          gameState.player.x + (Math.random() - 0.5) * 400,
+          gameState.player.y + (Math.random() - 0.5) * 400,
+          ['#fbbf24', '#f59e0b', '#a855f7', '#22d3ee'][Math.floor(Math.random() * 4)],
+          1, 5, 60, 5, true
+        );
+      }
+      
+      playSound('levelup');
+      setTimeout(() => playSound('powerup'), 300);
+      setTimeout(() => playSound('levelup'), 600);
+      
+      document.getElementById('screen-victory').classList.remove('hidden');
     }
 
 
