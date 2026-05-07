@@ -731,6 +731,67 @@
     .bp-reward-notif {
       animation: bpRewardSlide 5s ease-in-out forwards;
     }
+    /* Title chips for equipping */
+    .bp-title-chip {
+      padding: 8px 14px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 2px solid rgba(168, 85, 247, 0.3);
+      border-radius: 10px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      color: #c084fc;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .bp-title-chip:hover {
+      background: rgba(168, 85, 247, 0.15);
+      border-color: rgba(168, 85, 247, 0.7);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3);
+    }
+    .bp-title-chip.equipped {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(168, 85, 247, 0.2));
+      border-color: rgba(245, 158, 11, 0.7);
+      color: #fde68a;
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+    }
+    .bp-title-chip.equipped::after {
+      content: '✓ EQUIPPED';
+      font-size: 9px;
+      color: #fbbf24;
+      margin-left: 4px;
+      letter-spacing: 0.1em;
+    }
+    .bp-title-empty {
+      padding: 8px 14px;
+      background: rgba(15, 23, 42, 0.4);
+      border: 2px dashed rgba(100, 116, 139, 0.3);
+      border-radius: 10px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      color: #64748b;
+      font-style: italic;
+    }
+    .bp-title-unequip {
+      padding: 8px 12px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      border-radius: 10px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      color: #fca5a5;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: bold;
+    }
+    .bp-title-unequip:hover {
+      background: rgba(239, 68, 68, 0.3);
+    }
   </style>
 </head>
 <body class="text-slate-100 select-none overflow-hidden w-screen h-screen">
@@ -764,6 +825,9 @@
           </button>
           <button id="btn-battlepass" class="px-3 py-2 rounded-lg text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-amber-500/30 via-yellow-500/30 to-orange-500/30 border-2 border-amber-400/60 text-amber-200 hover:scale-105 shadow-[0_0_15px_rgba(245,158,11,0.25)]">
             🎟️ Battle Pass <span id="bp-tier-badge" class="text-[9px] bg-amber-600/50 px-1.5 py-0.5 rounded font-display">T1</span>
+          </button>
+          <button id="btn-titles" class="px-3 py-2 rounded-lg text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-purple-500/30 to-indigo-500/30 border-2 border-purple-400/60 text-purple-200 hover:scale-105 shadow-[0_0_15px_rgba(168,85,247,0.25)]">
+            🎖️ Titles <span id="titles-count-badge" class="text-[9px] bg-purple-600/50 px-1.5 py-0.5 rounded font-display">0</span>
           </button>
           <button id="btn-menu-admin" class="hidden glassmorphism hover:bg-rose-900/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer items-center gap-1.5 border border-rose-500/40 bg-rose-950/30 text-rose-300">
             👑 Admin
@@ -1142,6 +1206,60 @@
       </div>
     </div>
 
+    <!-- 13. TITLES VAULT MODAL (permanent — survives seasons) -->
+    <div id="modal-titles" class="hidden absolute inset-0 bg-slate-950/95 backdrop-blur-md z-[55] p-3 md:p-6 overflow-y-auto">
+      <div class="max-w-3xl mx-auto flex flex-col gap-3">
+        <!-- Header -->
+        <div class="flex justify-between items-center bg-gradient-to-r from-purple-950/60 via-indigo-950/60 to-purple-950/60 border-2 border-purple-500/40 rounded-xl p-4 shadow-[0_0_30px_rgba(168,85,247,0.2)]">
+          <div class="flex items-center gap-3">
+            <span class="text-3xl">🎖️</span>
+            <div>
+              <h2 class="font-fantasy font-extrabold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-200 to-amber-300">TITLES VAULT</h2>
+              <p class="text-[11px] text-purple-200/70 font-display tracking-wider">Your permanent collection — survives all seasons</p>
+            </div>
+          </div>
+          <button id="btn-close-titles" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg text-sm font-display font-bold text-slate-300 transition cursor-pointer">✕ CLOSE</button>
+        </div>
+
+        <!-- Currently Equipped Banner -->
+        <div class="glassmorphism border-2 border-amber-500/40 rounded-xl p-4 bg-gradient-to-br from-amber-950/30 via-orange-950/20 to-amber-950/30">
+          <p class="font-display text-[10px] uppercase tracking-widest text-amber-300 font-bold mb-2">⚔️ Currently Equipped</p>
+          <div id="titles-equipped-display" class="text-center py-2">
+            <!-- Filled dynamically -->
+          </div>
+        </div>
+
+        <!-- Stats summary -->
+        <div class="grid grid-cols-3 gap-2">
+          <div class="glassmorphism border border-slate-800 rounded-lg p-3 text-center">
+            <div class="text-purple-400 font-display font-extrabold text-2xl" id="titles-stat-owned">0</div>
+            <div class="text-[10px] text-slate-500 uppercase tracking-widest">Owned</div>
+          </div>
+          <div class="glassmorphism border border-slate-800 rounded-lg p-3 text-center">
+            <div class="text-amber-400 font-display font-extrabold text-2xl" id="titles-stat-total">3</div>
+            <div class="text-[10px] text-slate-500 uppercase tracking-widest">Available</div>
+          </div>
+          <div class="glassmorphism border border-slate-800 rounded-lg p-3 text-center">
+            <div class="text-emerald-400 font-display font-extrabold text-2xl"><span id="titles-stat-pct">0</span>%</div>
+            <div class="text-[10px] text-slate-500 uppercase tracking-widest">Collected</div>
+          </div>
+        </div>
+
+        <!-- All Titles Library -->
+        <div class="glassmorphism border border-slate-800 rounded-xl p-4">
+          <p class="font-display font-bold text-xs uppercase tracking-widest text-purple-400 mb-2">🏛️ Title Library</p>
+          <p class="text-[10px] text-slate-400 mb-3">Click an owned title to equip it. Locked titles show how to earn them.</p>
+          <div id="titles-library" class="flex flex-col gap-2">
+            <!-- Filled dynamically -->
+          </div>
+        </div>
+
+        <p class="text-[10px] text-slate-500 text-center pt-2">
+          💡 Titles are permanent. Even when seasons end and the Battle Pass resets, your titles remain in this vault forever.
+        </p>
+      </div>
+    </div>
+
     <!-- 12. BATTLE PASS MODAL -->
     <div id="modal-battlepass" class="hidden absolute inset-0 bg-slate-950/95 backdrop-blur-md z-[55] p-3 md:p-6 overflow-y-auto">
       <div class="max-w-5xl mx-auto flex flex-col gap-3">
@@ -1188,7 +1306,19 @@
             </div>
           </div>
           <div class="mt-3 text-[10px] text-slate-400 text-center">
-            💡 Earn Battle Pass XP from: <span class="text-emerald-300">+1 per kill</span> • <span class="text-amber-300">+10 per level-up</span> • <span class="text-purple-300">+100 per wave</span> • <span class="text-rose-300">+500 per win</span>
+            💡 Earn BP XP: <span class="text-emerald-300">+1 kill</span> • <span class="text-rose-300">+25 boss</span> • <span class="text-amber-300">+5 level-up</span> • <span class="text-purple-300">+40 wave</span> • <span class="text-yellow-300">+2,000 WIN</span>
+          </div>
+        </div>
+
+        <!-- Equipped Title Section -->
+        <div class="glassmorphism border-2 border-purple-500/40 rounded-xl p-4 bg-gradient-to-br from-purple-950/40 to-indigo-950/40">
+          <div class="flex justify-between items-center mb-2">
+            <p class="font-display font-bold text-xs uppercase tracking-widest text-purple-300 flex items-center gap-2">🎖️ My Titles</p>
+            <span class="text-[10px] text-slate-400 font-display"><span id="bp-title-count">0</span> unlocked</span>
+          </div>
+          <p class="text-[10px] text-slate-400 mb-3">Click any title to equip it. Equipped titles appear above your mage in-game!</p>
+          <div id="bp-titles-list" class="flex flex-wrap gap-2">
+            <!-- Title chips inserted dynamically -->
           </div>
         </div>
 
@@ -1200,7 +1330,7 @@
               ⚡ CLAIM ALL READY
             </button>
           </div>
-          <div id="bp-tier-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 max-h-[60vh] overflow-y-auto p-1">
+          <div id="bp-tier-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 max-h-[55vh] overflow-y-auto p-1">
             <!-- Tier cards inserted dynamically -->
           </div>
         </div>
@@ -2770,6 +2900,62 @@
 
         ctx.restore();
 
+        // Draw equipped TITLE above the mage
+        const equippedTitle = getEquippedTitle();
+        if (equippedTitle) {
+          ctx.save();
+          // Pick title styling based on rarity
+          let titleColor = '#fde68a'; // default gold
+          let glowColor = '#fbbf24';
+          let icon = '🎖️';
+          if (equippedTitle.includes('Champion')) {
+            titleColor = '#fef3c7';
+            glowColor = '#f59e0b';
+            icon = '👑';
+          } else if (equippedTitle.includes('Veteran')) {
+            titleColor = '#e9d5ff';
+            glowColor = '#a855f7';
+            icon = '🎖️';
+          } else if (equippedTitle.includes('Apprentice')) {
+            titleColor = '#bfdbfe';
+            glowColor = '#60a5fa';
+            icon = '🌟';
+          }
+
+          // Subtle pulsing
+          const pulse = 0.85 + Math.sin(Date.now() * 0.003) * 0.15;
+          const yOffset = -this.radius - 22;
+
+          // Background pill
+          ctx.font = 'bold 11px "Orbitron", sans-serif';
+          const fullText = `${icon} ${equippedTitle}`;
+          const textW = ctx.measureText(fullText).width + 16;
+          ctx.fillStyle = `rgba(15, 23, 42, ${0.85 * pulse})`;
+          ctx.strokeStyle = glowColor;
+          ctx.lineWidth = 1.5;
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = glowColor;
+          ctx.beginPath();
+          const px = this.x - textW / 2;
+          const py = this.y + yOffset - 8;
+          // Rounded rect
+          if (ctx.roundRect) {
+            ctx.roundRect(px, py, textW, 16, 8);
+          } else {
+            ctx.rect(px, py, textW, 16);
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          // Title text
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = titleColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(fullText, this.x, this.y + yOffset);
+          ctx.restore();
+        }
+
         // Draw orbital shields if unlocked
         if (this.spells.shield > 0) {
           const numOrbs = this.spells.shield === 1 ? 1 : this.spells.shield === 2 ? 2 : this.spells.shield === 3 ? 3 : this.spells.shield === 4 ? 3 : 4;
@@ -3014,13 +3200,30 @@
       takeDamage(amount) {
         // Invincible during dash i-frames
         if (this.invincible > 0) return;
-        
+
+        // Dodge chance — fully avoid the hit
+        if (this.dodgeChance && Math.random() < this.dodgeChance) {
+          gameState.floatingTexts.push(new FloatingText(this.x, this.y - 12, '👻 DODGE!', '#a78bfa', true));
+          this.invincible = 15;
+          return;
+        }
+
         this.hp -= amount;
         this.damageFlash = 8;
-        this.invincible = 25; // brief i-frames after hit
+        this.invincible = 25 + (this.iframeBonus || 0); // base + bonus i-frames
         updateHUD();
         playSound('hit');
         camera.shakeIntensity = 12;
+
+        // Thorns: damage the closest enemy that's touching us
+        if (this.thorns && this.thorns > 0) {
+          gameState.enemies.forEach(e => {
+            const d = Math.hypot(e.x - this.x, e.y - this.y);
+            if (d < e.radius + this.radius + 10) {
+              e.takeDamage(this.thorns, '#84cc16');
+            }
+          });
+        }
 
         // Reset combo on damage
         breakCombo();
@@ -3035,6 +3238,8 @@
       }
 
       addXp(amount) {
+        // Apply XP bonus multiplier
+        amount = Math.round(amount * (this.xpMult || 1));
         this.xp += amount;
         this.totalXpEarned = (this.totalXpEarned || 0) + amount; // cumulative tracker
         if (this.xp >= this.xpNeeded) {
@@ -3045,7 +3250,7 @@
           playSound('levelup');
           triggerLevelUpScreen();
           // Battle Pass XP for leveling up
-          addBpXp(10, 'level-up');
+          addBpXp(5, 'level-up');
         }
         updateHUD();
       }
@@ -3583,8 +3788,11 @@
         spawnParticles(this.x, this.y, color || '#ffffff', 5, 2, 15, 1.5);
 
         // Hovering damage tag
-        const isCrit = Math.random() < 0.15;
-        const finalAmt = isCrit ? Math.round(amount * 1.5) : Math.round(amount);
+        const p = gameState.player;
+        const critChance = (p && p.critChance) || 0.15;
+        const critMult = (p && p.critMult) || 1.5;
+        const isCrit = Math.random() < critChance;
+        const finalAmt = isCrit ? Math.round(amount * critMult) : Math.round(amount);
         if (isCrit) this.hp -= (finalAmt - amount); // process extra crit damage
 
         gameState.floatingTexts.push(new FloatingText(
@@ -3602,6 +3810,28 @@
         
         // Increment combo
         addToCombo();
+
+        const player = gameState.player;
+
+        // === LIFESTEAL: heal player on enemy kill ===
+        if (player && player.lifesteal && player.hp < player.maxHp) {
+          player.hp = Math.min(player.maxHp, player.hp + player.lifesteal);
+          updateHUD();
+        }
+
+        // === EXPLODE ON DEATH: deal AoE damage ===
+        if (player && player.explodeOnDeath > 0) {
+          const explodeDmg = player.explodeOnDeath;
+          const explodeRadius = 70;
+          spawnParticles(this.x, this.y, '#f97316', 12, 4, 25, 3, true);
+          gameState.enemies.forEach(e => {
+            if (e === this) return;
+            const d = Math.hypot(e.x - this.x, e.y - this.y);
+            if (d < explodeRadius) {
+              e.takeDamage(explodeDmg, '#f97316');
+            }
+          });
+        }
         
         // Drop XP Gems dynamically (Boss drops huge gold pile)
         if (this.isBoss) {
@@ -3636,8 +3866,13 @@
           } else if (roll < 0.08) {
             gameState.gems.push(new Gem(this.x, this.y, 'magnet')); // item magnet
           } else {
-            // XP Gems
-            const gemType = Math.random() < 0.85 ? 'blue' : 'purple';
+            // XP Gems — gold drop bonus increases chance for purple/gold
+            const goldBonus = (player && player.goldDropBonus) || 0;
+            const r = Math.random();
+            let gemType;
+            if (r < 0.05 * (1 + goldBonus)) gemType = 'gold';
+            else if (r < 0.20 * (1 + goldBonus)) gemType = 'purple';
+            else gemType = 'blue';
             gameState.gems.push(new Gem(this.x, this.y, gemType));
           }
         }
@@ -3645,8 +3880,8 @@
         // Remove from list
         gameState.enemies = gameState.enemies.filter(e => e !== this);
         gameState.kills++;
-        // Battle Pass XP per kill (1 normal, 50 for boss)
-        addBpXp(this.isBoss ? 50 : 1, 'kill');
+        // Battle Pass XP per kill (small per kill, big for boss)
+        addBpXp(this.isBoss ? 25 : 1, 'kill');
         gameState.score += this.points;
         updateHUD();
       }
@@ -4184,8 +4419,12 @@
     });
 
     // ===================== BATTLE PASS SYSTEM =====================
-    const BP_XP_PER_TIER = 500; // XP needed per tier
+    // Battle Pass tuning — significantly harder progression
+    const BP_XP_PER_TIER = 2500; // 5x harder per tier
     const BP_MAX_TIER = 50;
+    // Total XP for max: 50 tiers × 2500 = 125,000 XP
+    // At ~50 XP per game (10 kills + 1 wave): ~2,500 games for max
+    // At ~500 XP per win: ~250 wins for max
 
     // Define rewards for each tier (1-50). Cycle through types with milestones at 5/10/25/50.
     function buildBattlePassRewards() {
@@ -4263,6 +4502,8 @@
       else if (reward.type === 'startxp') data.bonuses.startxp += reward.value;
       else if (reward.type === 'title') {
         if (!data.titles.includes(reward.value)) data.titles.push(reward.value);
+        // ALSO add to permanent titles vault (survives season resets)
+        addTitleToVault(reward.value);
       }
 
       data.claimed.push(tierNum);
@@ -4302,6 +4543,206 @@
       setTimeout(() => popup.remove(), 5000);
     }
 
+    // ===================== PERMANENT TITLES VAULT =====================
+    // Stored separately from Battle Pass so titles SURVIVE season resets
+
+    // Master library of every title that exists in the game (from any source)
+    const TITLE_LIBRARY = [
+      { name: 'Apprentice',       icon: '🌟', rarity: 'rare',      source: 'Battle Pass Tier 5',  desc: 'Awarded at Battle Pass Tier 5 — your first step into magic.' },
+      { name: 'Veteran Mage',     icon: '🎖️', rarity: 'epic',      source: 'Battle Pass Tier 30', desc: 'Awarded at Battle Pass Tier 30 — proven warrior of the realm.' },
+      { name: 'Grand Champion',   icon: '👑', rarity: 'legendary', source: 'Battle Pass Tier 50', desc: 'Awarded at Battle Pass Tier 50 — the ultimate Spellweaver.' }
+    ];
+
+    function getTitlesVault() {
+      try {
+        // Migration: pull any titles from old BP data into the vault on first load
+        const stored = JSON.parse(localStorage.getItem('spellweaver_titles_vault')) || { owned: [] };
+        const bp = JSON.parse(localStorage.getItem('spellweaver_battlepass') || '{}');
+        if (bp.titles && Array.isArray(bp.titles)) {
+          bp.titles.forEach(t => { if (!stored.owned.includes(t)) stored.owned.push(t); });
+          localStorage.setItem('spellweaver_titles_vault', JSON.stringify(stored));
+        }
+        return stored;
+      } catch {
+        return { owned: [] };
+      }
+    }
+
+    function addTitleToVault(name) {
+      const vault = getTitlesVault();
+      if (!vault.owned.includes(name)) {
+        vault.owned.push(name);
+        localStorage.setItem('spellweaver_titles_vault', JSON.stringify(vault));
+        // Update menu badge
+        const badge = document.getElementById('titles-count-badge');
+        if (badge) badge.textContent = vault.owned.length;
+      }
+    }
+
+    // === TITLE EQUIP/UNEQUIP ===
+    function getEquippedTitle() {
+      return localStorage.getItem('spellweaver_equipped_title') || null;
+    }
+    function setEquippedTitle(title) {
+      if (title) localStorage.setItem('spellweaver_equipped_title', title);
+      else localStorage.removeItem('spellweaver_equipped_title');
+    }
+
+    // === RENDER TITLES VAULT MODAL ===
+    function renderTitlesVault() {
+      const vault = getTitlesVault();
+      const owned = vault.owned || [];
+      const equipped = getEquippedTitle();
+      const total = TITLE_LIBRARY.length;
+      const pct = total > 0 ? Math.round((owned.length / total) * 100) : 0;
+
+      // Stats
+      document.getElementById('titles-stat-owned').textContent = owned.length;
+      document.getElementById('titles-stat-total').textContent = total;
+      document.getElementById('titles-stat-pct').textContent = pct;
+
+      // Update menu badge
+      const badge = document.getElementById('titles-count-badge');
+      if (badge) badge.textContent = owned.length;
+
+      // Equipped display
+      const eqDiv = document.getElementById('titles-equipped-display');
+      if (equipped) {
+        const meta = TITLE_LIBRARY.find(t => t.name === equipped) || { icon: '🎖️' };
+        eqDiv.innerHTML = `
+          <div class="flex items-center justify-center gap-3">
+            <span class="text-3xl">${meta.icon}</span>
+            <span class="font-display font-extrabold text-xl text-amber-200">${equipped}</span>
+            <button id="btn-unequip-title" class="text-[10px] font-display font-bold px-3 py-1.5 bg-rose-600/30 hover:bg-rose-500/50 border border-rose-500/50 rounded text-rose-200 cursor-pointer transition tracking-widest">✕ UNEQUIP</button>
+          </div>
+        `;
+        document.getElementById('btn-unequip-title').addEventListener('click', () => {
+          setEquippedTitle(null);
+          renderTitlesVault();
+          showBpRewardNotif('Title unequipped');
+        });
+      } else {
+        eqDiv.innerHTML = `<div class="text-slate-500 italic font-display text-sm">No title equipped — pick one from your collection below 👇</div>`;
+      }
+
+      // Library list
+      const lib = document.getElementById('titles-library');
+      lib.innerHTML = '';
+      TITLE_LIBRARY.forEach(t => {
+        const isOwned = owned.includes(t.name);
+        const isEquipped = equipped === t.name;
+        const rarityColor = t.rarity === 'legendary' ? 'amber' : t.rarity === 'epic' ? 'purple' : 'cyan';
+        const colorClass = {
+          amber: 'border-amber-500/50 bg-amber-950/20',
+          purple: 'border-purple-500/50 bg-purple-950/20',
+          cyan: 'border-cyan-500/50 bg-cyan-950/20'
+        }[rarityColor];
+        const textColor = {
+          amber: 'text-amber-300',
+          purple: 'text-purple-300',
+          cyan: 'text-cyan-300'
+        }[rarityColor];
+
+        const row = document.createElement('div');
+        row.className = `flex items-center gap-3 p-3 rounded-lg border-2 transition ${isOwned ? colorClass + ' cursor-pointer hover:scale-[1.01]' : 'border-slate-800 bg-slate-900/40 opacity-60'} ${isEquipped ? 'ring-2 ring-amber-400/60 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : ''}`;
+        row.innerHTML = `
+          <span class="text-3xl ${isOwned ? '' : 'grayscale'}">${isOwned ? t.icon : '🔒'}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="font-display font-bold text-sm ${isOwned ? textColor : 'text-slate-500'}">${t.name}</span>
+              <span class="text-[8px] uppercase tracking-widest px-1.5 py-0.5 rounded ${textColor} bg-slate-950/60 border ${colorClass.split(' ')[0]}">${t.rarity}</span>
+              ${isEquipped ? '<span class="text-[9px] font-display font-extrabold text-amber-300 ml-auto">✓ EQUIPPED</span>' : ''}
+            </div>
+            <div class="text-[10px] text-slate-400 mt-0.5">${isOwned ? t.desc : '🔒 ' + t.source}</div>
+          </div>
+        `;
+        if (isOwned) {
+          row.addEventListener('click', () => {
+            if (isEquipped) {
+              setEquippedTitle(null);
+              showBpRewardNotif('Title unequipped');
+            } else {
+              setEquippedTitle(t.name);
+              showBpRewardNotif(`✨ Equipped: ${t.name}`);
+              playSound('powerup');
+            }
+            renderTitlesVault();
+          });
+        }
+        lib.appendChild(row);
+      });
+    }
+
+    // Wire up Titles button
+    document.getElementById('btn-titles').addEventListener('click', () => {
+      renderTitlesVault();
+      document.getElementById('modal-titles').classList.remove('hidden');
+    });
+    document.getElementById('btn-close-titles').addEventListener('click', () => {
+      document.getElementById('modal-titles').classList.add('hidden');
+    });
+
+    // Initialize titles badge on load + run migration
+    {
+      const v = getTitlesVault();
+      const initBadge = document.getElementById('titles-count-badge');
+      if (initBadge) initBadge.textContent = (v.owned || []).length;
+    }
+
+    function renderTitlesList() {
+      const data = getBpData();
+      const titles = data.titles || [];
+      const equipped = getEquippedTitle();
+      const list = document.getElementById('bp-titles-list');
+      const countEl = document.getElementById('bp-title-count');
+      if (countEl) countEl.textContent = titles.length;
+
+      if (!list) return;
+      list.innerHTML = '';
+
+      if (titles.length === 0) {
+        list.innerHTML = `<div class="bp-title-empty">🔒 No titles unlocked yet — claim title rewards from tiers 5, 30, and 50!</div>`;
+        return;
+      }
+
+      // Add unequip chip if something is equipped
+      if (equipped) {
+        const unequipBtn = document.createElement('button');
+        unequipBtn.className = 'bp-title-unequip';
+        unequipBtn.textContent = '✕ UNEQUIP';
+        unequipBtn.addEventListener('click', () => {
+          setEquippedTitle(null);
+          renderTitlesList();
+          showBpRewardNotif('Title unequipped');
+        });
+        list.appendChild(unequipBtn);
+      }
+
+      titles.forEach(title => {
+        const chip = document.createElement('button');
+        const isEquipped = title === equipped;
+        chip.className = 'bp-title-chip' + (isEquipped ? ' equipped' : '');
+        // Pick icon by title name
+        let icon = '🎖️';
+        if (title.includes('Champion')) icon = '👑';
+        else if (title.includes('Veteran')) icon = '🎖️';
+        else if (title.includes('Apprentice')) icon = '🌟';
+        chip.innerHTML = `<span>${icon}</span><span>${title}</span>`;
+        chip.addEventListener('click', () => {
+          if (isEquipped) {
+            setEquippedTitle(null);
+            showBpRewardNotif(`Title "${title}" unequipped`);
+          } else {
+            setEquippedTitle(title);
+            showBpRewardNotif(`✨ Equipped: ${title}`);
+            playSound('powerup');
+          }
+          renderTitlesList();
+        });
+        list.appendChild(chip);
+      });
+    }
+
     function renderBattlePass() {
       const data = getBpData();
       const unlockedTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER));
@@ -4322,6 +4763,9 @@
       // Update menu badge
       const badge = document.getElementById('bp-tier-badge');
       if (badge) badge.textContent = 'T' + currentTier;
+
+      // Render titles list
+      renderTitlesList();
 
       // Render tier grid
       const grid = document.getElementById('bp-tier-grid');
@@ -4896,7 +5340,7 @@
     });
 
     // ===================== SEASON 1 COUNTDOWN (Globally Synced) =====================
-    const SEASON_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const SEASON_DURATION_MS = 10 * 24 * 60 * 60 * 1000; // 10 days
     let seasonStartCached = null;
 
     async function fetchGlobalSeasonStart() {
@@ -5964,7 +6408,7 @@
             gameState.lastWaveTime = gameState.time;
             spawnWaveBanner();
             // Battle Pass XP per wave survived
-            addBpXp(100, 'wave');
+            addBpXp(40, 'wave');
 
             // === FINAL WAVE: spawn 10 BOSSES ===
             if (gameState.wave === 50) {
@@ -6299,7 +6743,7 @@
       stopGame();
 
       // Battle Pass: huge XP boost for winning!
-      addBpXp(500, 'victory');
+      addBpXp(2000, 'victory');
 
       // Update local high scores (was missing — now victory runs count too!)
       updateHighScores();
@@ -6504,6 +6948,144 @@
         rarity: 'Rare'
       });
 
+      // === NEW POWER UPGRADES ===
+
+      pool.push({
+        type: 'passive',
+        stat: 'critChance',
+        title: '🎯 Sharpened Focus',
+        desc: '+10% chance for spells to deal CRITICAL damage (2x damage).',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'critDamage',
+        title: '💢 Devastating Strikes',
+        desc: 'Critical hits deal +50% bonus damage on top.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'lifesteal',
+        title: '🩸 Vampiric Aura',
+        desc: 'Heal +1 HP every time you defeat an enemy.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'thorns',
+        title: '🌵 Thorned Shroud',
+        desc: 'Enemies that touch you take 15 damage in return.',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'dodge',
+        title: '👻 Ghostly Step',
+        desc: '+15% chance to completely DODGE incoming damage.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'xpBonus',
+        title: '📚 Forbidden Knowledge',
+        desc: '+25% XP from all sources. Level up faster!',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'goldDrop',
+        title: '💰 Wealth Affinity',
+        desc: '+50% chance for enemies to drop gold (heavy XP) gems.',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'projSpeed',
+        title: '🚀 Velocity Enchant',
+        desc: 'All projectile spells fly +30% faster.',
+        rarity: 'Common'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'projSize',
+        title: '🔮 Empowered Cast',
+        desc: 'All projectile spells are +25% LARGER (bigger hitbox).',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'multishot',
+        title: '🏹 Echo Cast',
+        desc: '+1 EXTRA projectile fired with every spell cast!',
+        rarity: 'Legendary'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'bigHeal',
+        title: '✨ Divine Restoration',
+        desc: 'INSTANTLY restore 75 HP right now!',
+        rarity: 'Common'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'invincibility',
+        title: '⚜️ Aegis Pulse',
+        desc: 'Permanent +30 frames of invincibility after taking damage.',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'dashCooldown',
+        title: '💨 Swift Reflexes',
+        desc: 'Dash cooldown reduced by 30%.',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'explodeOnDeath',
+        title: '💥 Cursed Remains',
+        desc: 'Enemies EXPLODE on death, dealing 25 damage to nearby foes.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'comboBoost',
+        title: '🔥 Killing Spree',
+        desc: 'Combo multiplier capped 50% higher (boosts score even more).',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'doubleSpells',
+        title: '⚡⚡ Twin Casting',
+        desc: 'LEGENDARY: Every spell has a 25% chance to cast TWICE!',
+        rarity: 'Legendary'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'fullPower',
+        title: '👑 Divine Awakening',
+        desc: 'LEGENDARY: +20% damage, +20% speed, +20% cooldown reduction at once!',
+        rarity: 'Legendary'
+      });
+
       return pool;
     }
 
@@ -6540,7 +7122,6 @@
             break;
           case 'hpRegen':
             p.hpRegen = (p.hpRegen || 0) + 1.5;
-            // Spawn repeating timer trigger
             if (!p.hpRegenActive) {
               p.hpRegenActive = true;
               setInterval(() => {
@@ -6550,6 +7131,62 @@
                 }
               }, 1000);
             }
+            break;
+
+          // === NEW UPGRADE EFFECTS ===
+          case 'critChance':
+            p.critChance = (p.critChance || 0.15) + 0.10;
+            break;
+          case 'critDamage':
+            p.critMult = (p.critMult || 2.0) + 0.5;
+            break;
+          case 'lifesteal':
+            p.lifesteal = (p.lifesteal || 0) + 1;
+            break;
+          case 'thorns':
+            p.thorns = (p.thorns || 0) + 15;
+            break;
+          case 'dodge':
+            p.dodgeChance = (p.dodgeChance || 0) + 0.15;
+            break;
+          case 'xpBonus':
+            p.xpMult = (p.xpMult || 1) + 0.25;
+            break;
+          case 'goldDrop':
+            p.goldDropBonus = (p.goldDropBonus || 0) + 0.5;
+            break;
+          case 'projSpeed':
+            p.projSpeedMult = (p.projSpeedMult || 1) + 0.30;
+            break;
+          case 'projSize':
+            p.projSizeMult = (p.projSizeMult || 1) + 0.25;
+            break;
+          case 'multishot':
+            p.multishot = (p.multishot || 0) + 1;
+            break;
+          case 'bigHeal':
+            p.hp = Math.min(p.maxHp, p.hp + 75);
+            spawnParticles(p.x, p.y, '#10b981', 30, 4, 35, 3, true);
+            break;
+          case 'invincibility':
+            p.iframeBonus = (p.iframeBonus || 0) + 30;
+            break;
+          case 'dashCooldown':
+            p.dashMaxCooldown = Math.max(500, (p.dashMaxCooldown || 2500) * 0.7);
+            break;
+          case 'explodeOnDeath':
+            p.explodeOnDeath = (p.explodeOnDeath || 0) + 25;
+            break;
+          case 'comboBoost':
+            gameState.comboMaxMult = (gameState.comboMaxMult || 5) + 2.5;
+            break;
+          case 'doubleSpells':
+            p.doubleCastChance = (p.doubleCastChance || 0) + 0.25;
+            break;
+          case 'fullPower':
+            p.damageMult += 0.20;
+            p.speed *= 1.20;
+            p.cooldownMult = Math.max(0.2, p.cooldownMult - 0.20);
             break;
         }
         gameState.floatingTexts.push(new FloatingText(p.x, p.y - 20, `PASSIVE ENCHANTED: ${choice.title.toUpperCase()}`, '#facc15', true));
