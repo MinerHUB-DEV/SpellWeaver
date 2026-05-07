@@ -9,7 +9,7 @@
   <!-- Firebase SDK (modular v10) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, collection, query, orderBy, limit, getDocs, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, collection, query, orderBy, limit, getDocs, doc, setDoc, getDoc, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
     import { getDatabase, ref, set, onValue, remove, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
     // ⚠️ TODO: Replace these placeholder values with your actual Firebase config
@@ -41,11 +41,60 @@
         window.firebaseStatus = 'connected';
 
         // Helper: fetch top leaderboard entries sorted by a field
-        window.fbFetchLeaderboard = async function(sortField = 'level', topN = 25) {
+        // Get the global "everything before this timestamp is hidden" cutoff
+        window.fbGetLbResetTime = async function() {
           try {
+            const ref = doc(db, "config", "leaderboard");
+            const snap = await getDoc(ref);
+            if (snap.exists() && snap.data().resetAt) return snap.data().resetAt;
+            return 0;
+          } catch { return 0; }
+        };
+
+        // Set the global cutoff to NOW (everyone instantly sees empty leaderboard)
+        window.fbSetLbResetTime = async function() {
+          try {
+            const ref = doc(db, "config", "leaderboard");
+            const now = Date.now();
+            await setDoc(ref, { resetAt: now, resetBy: 'admin', resetWhen: now }, { merge: true });
+            console.log('🕒 Global leaderboard cutoff set to', new Date(now).toISOString());
+            return now;
+          } catch (err) {
+            console.error('Failed to set cutoff:', err);
+            return 0;
+          }
+        };
+
+        window._lbCachedCutoff = 0;
+        window._lbCutoffFetchTime = 0;
+        // Helper to force-refresh cutoff cache (used after admin wipe)
+        window.fbForceRefreshCutoff = async function() {
+          window._lbCachedCutoff = await window.fbGetLbResetTime();
+          window._lbCutoffFetchTime = Date.now();
+          return window._lbCachedCutoff;
+        };
+
+        window.fbFetchLeaderboard = async function(sortField = 'level', topN = 50) {
+          try {
+            // Refresh cutoff every 60s
+            if (Date.now() - window._lbCutoffFetchTime > 60000) {
+              window._lbCachedCutoff = await window.fbGetLbResetTime();
+              window._lbCutoffFetchTime = Date.now();
+            }
             const q = query(collection(db, "leaderboard"), orderBy(sortField, "desc"), limit(topN));
             const snap = await getDocs(q);
-            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Filter out: wiped, empty, OR uploaded before the global reset cutoff
+            return snap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(e => {
+                if (e.wiped) return false;
+                if (!e.name || e.name === '__WIPED__') return false;
+                if (!(e.level > 0 || e.kills > 0 || e.xp > 0 || e.score > 0 || e.wins > 0)) return false;
+                // If entry's updatedAt is BEFORE the global reset, hide it
+                if (window._lbCachedCutoff > 0 && (!e.updatedAt || e.updatedAt < window._lbCachedCutoff)) return false;
+                return true;
+              })
+              .slice(0, 25);
           } catch (err) {
             console.error("Leaderboard fetch failed:", err);
             return null;
@@ -60,19 +109,84 @@
             const ref = doc(db, "leaderboard", docId);
             const existing = await getDoc(ref);
             let data = existing.exists() ? existing.data() : { wins: 0 };
-            // Keep best values
-            data.name = entry.name;
+            // Keep best values (defensive: ensure all are numbers)
+            data.name = entry.name || 'Anonymous';
             data.class = entry.class || data.class || 'pyro';
-            data.level = Math.max(data.level || 0, entry.level || 0);
-            data.xp = Math.max(data.xp || 0, entry.xp || 0);
-            data.kills = Math.max(data.kills || 0, entry.kills || 0);
-            data.score = Math.max(data.score || 0, entry.score || 0);
-            if (entry.win) data.wins = (data.wins || 0) + 1;
+            data.level = Math.max(Number(data.level) || 0, Number(entry.level) || 0);
+            data.xp = Math.max(Number(data.xp) || 0, Number(entry.xp) || 0);
+            data.kills = Math.max(Number(data.kills) || 0, Number(entry.kills) || 0);
+            data.score = Math.max(Number(data.score) || 0, Number(entry.score) || 0);
+            data.wins = Number(data.wins) || 0;
+            if (entry.win) data.wins += 1;
             data.updatedAt = Date.now();
             await setDoc(ref, data);
+            console.log('✅ Leaderboard submitted:', data.name, 'LV', data.level, 'XP', data.xp, 'Kills', data.kills, 'Score', data.score, 'Wins', data.wins);
             return true;
           } catch (err) {
-            console.error("Leaderboard submit failed:", err);
+            console.error("❌ Leaderboard submit failed:", err);
+            return false;
+          }
+        };
+
+        // Wipe ALL leaderboard entries — tries delete first, falls back to overwrite-with-zero
+        window.fbWipeLeaderboard = async function() {
+          const result = { method: null, count: 0, error: null };
+          try {
+            const snap = await getDocs(collection(db, "leaderboard"));
+            result.count = snap.size;
+            if (snap.size === 0) {
+              result.method = 'empty';
+              return result;
+            }
+
+            // Strategy 1: Try batch delete
+            try {
+              const batch = writeBatch(db);
+              snap.docs.forEach(d => batch.delete(d.ref));
+              await batch.commit();
+              result.method = 'delete';
+              console.log(`🧹 DELETED ${snap.size} leaderboard entries`);
+              return result;
+            } catch (delErr) {
+              console.warn('Delete failed, trying overwrite fallback:', delErr.message);
+
+              // Strategy 2: Overwrite each entry to zero (works without delete permission)
+              const overwriteBatch = writeBatch(db);
+              snap.docs.forEach(d => {
+                overwriteBatch.set(d.ref, {
+                  name: '__WIPED__',
+                  class: 'pyro',
+                  level: 0,
+                  xp: 0,
+                  kills: 0,
+                  score: 0,
+                  wins: 0,
+                  wiped: true,
+                  updatedAt: Date.now()
+                });
+              });
+              await overwriteBatch.commit();
+              result.method = 'overwrite';
+              console.log(`🧹 OVERWRITE-WIPED ${snap.size} leaderboard entries`);
+              return result;
+            }
+          } catch (err) {
+            console.error("Wipe leaderboard failed completely:", err);
+            result.error = err.message + ' [' + (err.code || 'unknown') + ']';
+            result.count = -1;
+            return result;
+          }
+        };
+
+        // Delete a single leaderboard entry by name
+        window.fbDeleteEntry = async function(name) {
+          try {
+            const docId = (name || 'anonymous').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 30);
+            await deleteDoc(doc(db, "leaderboard", docId));
+            console.log(`🗑️ Deleted leaderboard entry: ${name}`);
+            return true;
+          } catch (err) {
+            console.error("Delete entry failed:", err);
             return false;
           }
         };
@@ -163,27 +277,38 @@
               const cmdId = 'cmd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
               const cref = ref(rtdb, 'commands/' + targetSessionId + '/' + cmdId);
               await set(cref, { ...cmd, sentAt: Date.now() });
+              console.log('📤 Sent command', cmd.type, 'to', targetSessionId);
               // Auto-cleanup after 10 seconds even if player misses it
               setTimeout(() => { remove(cref).catch(() => {}); }, 10000);
-              return true;
+              return { ok: true };
             } catch (err) {
-              console.error('Send command failed:', err);
-              return false;
+              console.error('❌ Send command failed:', err.message, err.code);
+              return { ok: false, error: err.message + (err.code ? ' [' + err.code + ']' : '') };
             }
           };
 
           // Listen for incoming commands (called by player when they start a game)
           window.fbListenCommands = function(callback) {
             const cref = ref(rtdb, 'commands/' + sessionId);
+            console.log('📡 Subscribing to /commands/' + sessionId);
             return onValue(cref, (snapshot) => {
               const data = snapshot.val() || {};
-              Object.entries(data).forEach(([cmdId, cmd]) => {
+              const entries = Object.entries(data);
+              if (entries.length > 0) console.log('📨 Got', entries.length, 'pending command(s)');
+              entries.forEach(([cmdId, cmd]) => {
                 if (cmd && cmd.type) {
                   callback(cmd);
                   // Remove the command immediately so we don't reprocess it
-                  remove(ref(rtdb, 'commands/' + sessionId + '/' + cmdId)).catch(() => {});
+                  remove(ref(rtdb, 'commands/' + sessionId + '/' + cmdId)).catch((err) => {
+                    console.warn('Could not remove command:', err.message);
+                  });
                 }
               });
+            }, (err) => {
+              console.error('❌ Command listener error:', err.message, err.code);
+              if (err.code && err.code.includes('PERMISSION')) {
+                console.error('💡 Add /commands rule to your RTDB! See chat instructions.');
+              }
             });
           };
 
@@ -518,6 +643,94 @@
     .admin-cmd-notif {
       animation: adminCmdSlide 4s ease-in-out forwards;
     }
+    /* Battle Pass tier cards */
+    .bp-tier {
+      position: relative;
+      padding: 10px 8px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 2px solid rgba(100, 116, 139, 0.3);
+      border-radius: 10px;
+      text-align: center;
+      transition: all 0.2s ease;
+      min-height: 110px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 4px;
+    }
+    .bp-tier.locked {
+      opacity: 0.55;
+      filter: grayscale(0.6);
+    }
+    .bp-tier.ready {
+      border-color: rgba(245, 158, 11, 0.7);
+      background: rgba(120, 53, 15, 0.25);
+      animation: bpReady 1.5s infinite ease-in-out;
+      cursor: pointer;
+    }
+    .bp-tier.claimed {
+      border-color: rgba(16, 185, 129, 0.5);
+      background: rgba(6, 78, 59, 0.25);
+    }
+    .bp-tier.claimed::after {
+      content: '✓';
+      position: absolute;
+      top: 4px;
+      right: 6px;
+      color: #10b981;
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .bp-tier.legendary {
+      border-color: rgba(168, 85, 247, 0.6);
+      background: rgba(88, 28, 135, 0.2);
+    }
+    .bp-tier.legendary.ready {
+      animation: bpLegendary 1.5s infinite ease-in-out;
+    }
+    @keyframes bpReady {
+      0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.4); }
+      50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.7); }
+    }
+    @keyframes bpLegendary {
+      0%, 100% { box-shadow: 0 0 12px rgba(168, 85, 247, 0.5); }
+      50% { box-shadow: 0 0 25px rgba(168, 85, 247, 0.8), 0 0 35px rgba(245, 158, 11, 0.4); }
+    }
+    .bp-tier-num {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 9px;
+      font-weight: bold;
+      color: #94a3b8;
+      letter-spacing: 0.1em;
+    }
+    .bp-tier-icon {
+      font-size: 28px;
+      line-height: 1;
+    }
+    .bp-tier-name {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 9px;
+      font-weight: bold;
+      color: #e2e8f0;
+      line-height: 1.2;
+    }
+    .bp-tier-status {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    /* Battle pass reward popup notification */
+    @keyframes bpRewardSlide {
+      0% { transform: translateY(-100%) scale(0.5); opacity: 0; }
+      15% { transform: translateY(0) scale(1.1); opacity: 1; }
+      25% { transform: translateY(0) scale(1); opacity: 1; }
+      85% { transform: translateY(0) scale(1); opacity: 1; }
+      100% { transform: translateY(-100%) scale(0.8); opacity: 0; }
+    }
+    .bp-reward-notif {
+      animation: bpRewardSlide 5s ease-in-out forwards;
+    }
   </style>
 </head>
 <body class="text-slate-100 select-none overflow-hidden w-screen h-screen">
@@ -548,6 +761,9 @@
           </div>
           <button id="btn-leaderboard" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
             🏆 Leaderboard
+          </button>
+          <button id="btn-battlepass" class="px-3 py-2 rounded-lg text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-amber-500/30 via-yellow-500/30 to-orange-500/30 border-2 border-amber-400/60 text-amber-200 hover:scale-105 shadow-[0_0_15px_rgba(245,158,11,0.25)]">
+            🎟️ Battle Pass <span id="bp-tier-badge" class="text-[9px] bg-amber-600/50 px-1.5 py-0.5 rounded font-display">T1</span>
           </button>
           <button id="btn-menu-admin" class="hidden glassmorphism hover:bg-rose-900/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer items-center gap-1.5 border border-rose-500/40 bg-rose-950/30 text-rose-300">
             👑 Admin
@@ -926,6 +1142,71 @@
       </div>
     </div>
 
+    <!-- 12. BATTLE PASS MODAL -->
+    <div id="modal-battlepass" class="hidden absolute inset-0 bg-slate-950/95 backdrop-blur-md z-[55] p-3 md:p-6 overflow-y-auto">
+      <div class="max-w-5xl mx-auto flex flex-col gap-3">
+        <!-- Header -->
+        <div class="flex justify-between items-center bg-gradient-to-r from-amber-950/60 via-purple-950/60 to-amber-950/60 border-2 border-amber-500/40 rounded-xl p-4 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+          <div class="flex items-center gap-3">
+            <span class="text-3xl">🎟️</span>
+            <div>
+              <h2 class="font-fantasy font-extrabold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-200 to-orange-300">SEASON 1 BATTLE PASS</h2>
+              <p class="text-[11px] text-amber-200/70 font-display tracking-wider">Earn rewards as you play • 100% FREE</p>
+            </div>
+          </div>
+          <button id="btn-close-battlepass" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg text-sm font-display font-bold text-slate-300 transition cursor-pointer">✕ CLOSE</button>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="glassmorphism border border-amber-500/30 rounded-xl p-4">
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="font-display font-bold text-sm text-amber-300">CURRENT TIER:</span>
+              <span id="bp-current-tier" class="font-display font-extrabold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-400">1</span>
+              <span class="text-slate-500">/ 50</span>
+            </div>
+            <div class="text-right">
+              <div id="bp-xp-text" class="text-xs font-display text-slate-400">0 / 500 XP</div>
+              <div class="text-[10px] text-amber-300 font-display">Next tier in <span id="bp-xp-remaining">500</span> XP</div>
+            </div>
+          </div>
+          <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-amber-700/40 p-[2px]">
+            <div id="bp-progress-bar" class="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-400 rounded-full transition-all shadow-[0_0_15px_rgba(245,158,11,0.6)]" style="width: 0%"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-2 mt-3 text-center text-[10px]">
+            <div class="bg-slate-900/40 border border-slate-800 rounded p-2">
+              <div class="text-emerald-400 font-display font-bold text-sm" id="bp-stat-claimed">0</div>
+              <div class="text-slate-500 uppercase tracking-widest">Claimed</div>
+            </div>
+            <div class="bg-slate-900/40 border border-slate-800 rounded p-2">
+              <div class="text-amber-400 font-display font-bold text-sm" id="bp-stat-unclaimed">0</div>
+              <div class="text-slate-500 uppercase tracking-widest">Ready</div>
+            </div>
+            <div class="bg-slate-900/40 border border-slate-800 rounded p-2">
+              <div class="text-purple-400 font-display font-bold text-sm" id="bp-stat-locked">50</div>
+              <div class="text-slate-500 uppercase tracking-widest">Locked</div>
+            </div>
+          </div>
+          <div class="mt-3 text-[10px] text-slate-400 text-center">
+            💡 Earn Battle Pass XP from: <span class="text-emerald-300">+1 per kill</span> • <span class="text-amber-300">+10 per level-up</span> • <span class="text-purple-300">+100 per wave</span> • <span class="text-rose-300">+500 per win</span>
+          </div>
+        </div>
+
+        <!-- Tier grid -->
+        <div class="glassmorphism border border-slate-800 rounded-xl p-3">
+          <div class="flex justify-between items-center mb-2">
+            <p class="font-display font-bold text-xs uppercase tracking-widest text-amber-400">🎁 Reward Tiers</p>
+            <button id="btn-claim-all" class="text-[10px] font-display font-bold px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-white cursor-pointer transition shadow-lg">
+              ⚡ CLAIM ALL READY
+            </button>
+          </div>
+          <div id="bp-tier-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 max-h-[60vh] overflow-y-auto p-1">
+            <!-- Tier cards inserted dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 11. NAME PROMPT MODAL (forced before first play) -->
     <div id="modal-nameprompt" class="hidden absolute inset-0 bg-slate-950/95 backdrop-blur-md z-[60] flex justify-center items-center p-4">
       <div class="glassmorphism w-full max-w-md rounded-2xl p-6 border-2 border-amber-500/50 flex flex-col gap-4 shadow-[0_0_50px_rgba(245,158,11,0.2)] relative overflow-hidden">
@@ -1154,10 +1435,19 @@
         <div id="admin-feedback" class="hidden text-center text-[11px] font-display py-2 rounded"></div>
 
         <!-- DANGER ZONE -->
-        <div class="border-2 border-rose-500/40 rounded-xl p-3 bg-rose-950/10">
-          <p class="font-display text-[10px] uppercase tracking-widest text-rose-400 font-bold mb-2 text-center">⚠️ DANGER ZONE ⚠️</p>
+        <div class="border-2 border-rose-500/40 rounded-xl p-3 bg-rose-950/10 flex flex-col gap-2">
+          <p class="font-display text-[10px] uppercase tracking-widest text-rose-400 font-bold mb-1 text-center">⚠️ DANGER ZONE ⚠️</p>
           <button class="admin-btn admin-btn-danger w-full" data-action="reset-all-stats" style="text-align: center; padding: 12px; font-size: 12px;">
-            💥 RESET ALL STATS (WIPE EVERYTHING)
+            💥 RESET ALL LOCAL STATS (THIS DEVICE)
+          </button>
+          <button class="admin-btn admin-btn-danger w-full" data-action="nuclear-wipe-leaderboard" style="text-align: center; padding: 14px; font-size: 13px; background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.7); font-weight: 900;">
+            ☢️ NUCLEAR WIPE LEADERBOARD ☢️
+          </button>
+          <button class="admin-btn admin-btn-danger w-full" data-action="wipe-global-leaderboard" style="text-align: center; padding: 12px; font-size: 12px;">
+            🌍 WIPE GLOBAL LEADERBOARD (ALL PLAYERS)
+          </button>
+          <button class="admin-btn admin-btn-danger w-full" data-action="wipe-my-leaderboard" style="text-align: center; padding: 10px; font-size: 11px;">
+            🗑️ Remove MY Leaderboard Entry
           </button>
         </div>
 
@@ -1428,7 +1718,10 @@
         <p class="text-[11px] text-slate-500 text-center -mt-1">Compete against the world's most legendary Spellweavers</p>
 
         <!-- Live status banner -->
-        <div id="leaderboard-status" class="text-[10px] text-center font-display tracking-wider py-1.5 bg-slate-900/40 border border-slate-800/40 rounded">⏳ Connecting...</div>
+        <div class="flex items-center gap-2">
+          <div id="leaderboard-status" class="flex-1 text-[10px] text-center font-display tracking-wider py-1.5 bg-slate-900/40 border border-slate-800/40 rounded">⏳ Connecting...</div>
+          <button id="btn-lb-refresh" class="text-[10px] font-display font-bold px-3 py-1.5 bg-amber-700/30 hover:bg-amber-600/40 border border-amber-500/40 rounded text-amber-200 cursor-pointer transition" title="Refresh leaderboard">🔄</button>
+        </div>
 
         <!-- Tabs -->
         <div class="flex gap-1 p-1 bg-slate-900/60 rounded-lg border border-slate-800">
@@ -2743,6 +3036,7 @@
 
       addXp(amount) {
         this.xp += amount;
+        this.totalXpEarned = (this.totalXpEarned || 0) + amount; // cumulative tracker
         if (this.xp >= this.xpNeeded) {
           this.xp -= this.xpNeeded;
           this.level++;
@@ -2750,6 +3044,8 @@
           
           playSound('levelup');
           triggerLevelUpScreen();
+          // Battle Pass XP for leveling up
+          addBpXp(10, 'level-up');
         }
         updateHUD();
       }
@@ -3349,6 +3645,8 @@
         // Remove from list
         gameState.enemies = gameState.enemies.filter(e => e !== this);
         gameState.kills++;
+        // Battle Pass XP per kill (1 normal, 50 for boss)
+        addBpXp(this.isBoss ? 50 : 1, 'kill');
         gameState.score += this.points;
         updateHUD();
       }
@@ -3691,35 +3989,24 @@
     // ===================== LEADERBOARD SYSTEM =====================
     let currentLbTab = 'level';
 
+    // Local cache only — NO seeding (real player data only!)
     function getLeaderboard() {
       try {
-        return JSON.parse(localStorage.getItem('spellweaver_leaderboard')) || seedLeaderboard();
+        return JSON.parse(localStorage.getItem('spellweaver_leaderboard')) || [];
       } catch {
-        return seedLeaderboard();
+        return [];
       }
     }
 
-    // Seed with fake legendary mages so it's not empty
-    function seedLeaderboard() {
-      const seedNames = [
-        { name: 'ArchLich_Vex', class: 'storm', level: 28, xp: 18420, kills: 2150, wins: 7 },
-        { name: 'EmberKnight', class: 'pyro', level: 25, xp: 15330, kills: 1830, wins: 5 },
-        { name: 'FrostQueen99', class: 'cryo', level: 24, xp: 14210, kills: 1740, wins: 4 },
-        { name: 'StormcallerX', class: 'storm', level: 22, xp: 13050, kills: 1620, wins: 3 },
-        { name: 'TideMaster', class: 'water', level: 21, xp: 12480, kills: 1510, wins: 3 },
-        { name: 'GaleRider', class: 'wind', level: 20, xp: 11200, kills: 1380, wins: 2 },
-        { name: 'PyroRogue', class: 'pyro', level: 18, xp: 9850, kills: 1190, wins: 2 },
-        { name: 'IceShard_77', class: 'cryo', level: 17, xp: 9100, kills: 1080, wins: 1 },
-        { name: 'VoidWalker', class: 'storm', level: 15, xp: 7820, kills: 950, wins: 1 },
-        { name: 'WindChaser', class: 'wind', level: 14, xp: 7100, kills: 880, wins: 1 },
-        { name: 'AquaSage_42', class: 'water', level: 13, xp: 6450, kills: 780, wins: 1 },
-        { name: 'CinderSorc', class: 'pyro', level: 12, xp: 5900, kills: 710, wins: 0 }
-      ];
-      localStorage.setItem('spellweaver_leaderboard', JSON.stringify(seedNames));
-      return seedNames;
-    }
+    // Global flag: when true, NO submissions are sent to leaderboard
+    window.leaderboardSavingPaused = false;
 
     async function submitToLeaderboard(stats) {
+      // Respect pause flag (used during nuclear wipe)
+      if (window.leaderboardSavingPaused) {
+        console.log('⏸️ Leaderboard saving is paused — skipped submission');
+        return;
+      }
       const playerName = localStorage.getItem('spellweaver_playername') || 'Anonymous';
       const entry = {
         name: playerName,
@@ -3763,14 +4050,14 @@
       let entries = null;
       let isGlobal = false;
 
-      // Try Firebase first
+      // Try Firebase first — null means error, [] means truly empty (don't fall back!)
       if (window.firebaseReady && window.fbFetchLeaderboard) {
         entries = await window.fbFetchLeaderboard(sortKey, 25);
-        if (entries) isGlobal = true;
+        if (Array.isArray(entries)) isGlobal = true;
       }
 
-      // Fallback to local
-      if (!entries) {
+      // Fallback to local ONLY if Firebase actually errored (entries === null)
+      if (entries === null || entries === undefined) {
         const board = getLeaderboard();
         entries = [...board].sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0)).slice(0, 25);
       }
@@ -3869,6 +4156,17 @@
     document.querySelectorAll('.lb-tab').forEach(btn => {
       btn.addEventListener('click', () => setLbTab(btn.dataset.tab));
     });
+    // Manual refresh button
+    document.getElementById('btn-lb-refresh').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-lb-refresh');
+      btn.style.transform = 'rotate(360deg)';
+      btn.style.transition = 'transform 0.5s';
+      await renderLeaderboard();
+      setTimeout(() => {
+        btn.style.transform = '';
+        btn.style.transition = '';
+      }, 500);
+    });
     document.getElementById('btn-save-name').addEventListener('click', () => {
       const name = document.getElementById('leaderboard-name').value.trim() || 'Anonymous';
       localStorage.setItem('spellweaver_playername', name);
@@ -3884,6 +4182,194 @@
       }, 1200);
       renderLeaderboard();
     });
+
+    // ===================== BATTLE PASS SYSTEM =====================
+    const BP_XP_PER_TIER = 500; // XP needed per tier
+    const BP_MAX_TIER = 50;
+
+    // Define rewards for each tier (1-50). Cycle through types with milestones at 5/10/25/50.
+    function buildBattlePassRewards() {
+      const tiers = [];
+      for (let i = 1; i <= BP_MAX_TIER; i++) {
+        let reward;
+        if (i === 50) reward = { type: 'title', name: 'Champion Title', icon: '👑', value: 'Grand Champion', rarity: 'legendary', desc: 'Unlock the legendary "Grand Champion" title' };
+        else if (i === 25) reward = { type: 'damage', name: '+50% Damage Buff', icon: '💥', value: 0.5, rarity: 'legendary', desc: 'Permanent +50% spell damage' };
+        else if (i === 40) reward = { type: 'cooldown', name: '-25% Cooldown', icon: '⏳', value: 0.25, rarity: 'legendary', desc: 'Permanent -25% spell cooldown' };
+        else if (i === 30) reward = { type: 'title', name: 'Veteran Title', icon: '🎖️', value: 'Veteran Mage', rarity: 'epic', desc: 'Unlock "Veteran Mage" title' };
+        else if (i === 20) reward = { type: 'speed', name: '+15% Speed Buff', icon: '⚡', value: 0.15, rarity: 'epic', desc: 'Permanent +15% movement speed' };
+        else if (i === 15) reward = { type: 'magnet', name: '+50 Magnet Range', icon: '🧲', value: 50, rarity: 'epic', desc: 'Permanent +50 gem pickup range' };
+        else if (i === 10) reward = { type: 'maxhp', name: '+25 Max HP Buff', icon: '❤️', value: 25, rarity: 'rare', desc: 'Permanent +25 max HP' };
+        else if (i === 5) reward = { type: 'title', name: 'Apprentice Title', icon: '🌟', value: 'Apprentice', rarity: 'rare', desc: 'Unlock "Apprentice" title' };
+        else if (i % 7 === 0) reward = { type: 'startxp', name: '+100 Starting XP', icon: '✨', value: 100, rarity: 'rare', desc: '+100 XP given at game start' };
+        else if (i % 5 === 0) reward = { type: 'maxhp', name: '+10 Max HP', icon: '❤️', value: 10, rarity: 'rare', desc: '+10 max HP boost' };
+        else if (i % 3 === 0) reward = { type: 'damage', name: '+5% Damage', icon: '💥', value: 0.05, rarity: 'common', desc: '+5% spell damage' };
+        else if (i % 2 === 0) reward = { type: 'speed', name: '+3% Speed', icon: '⚡', value: 0.03, rarity: 'common', desc: '+3% movement speed' };
+        else reward = { type: 'maxhp', name: '+5 Max HP', icon: '❤️', value: 5, rarity: 'common', desc: '+5 max HP' };
+        tiers.push({ tier: i, ...reward });
+      }
+      return tiers;
+    }
+    const BP_REWARDS = buildBattlePassRewards();
+
+    function getBpData() {
+      try {
+        return JSON.parse(localStorage.getItem('spellweaver_battlepass')) || { xp: 0, claimed: [], bonuses: { maxhp: 0, speed: 0, damage: 0, cooldown: 0, magnet: 0, startxp: 0 }, titles: [] };
+      } catch {
+        return { xp: 0, claimed: [], bonuses: { maxhp: 0, speed: 0, damage: 0, cooldown: 0, magnet: 0, startxp: 0 }, titles: [] };
+      }
+    }
+
+    function saveBpData(data) {
+      localStorage.setItem('spellweaver_battlepass', JSON.stringify(data));
+    }
+
+    function getBpTier() {
+      const data = getBpData();
+      return Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER) + 1);
+    }
+
+    function addBpXp(amount, reason) {
+      const data = getBpData();
+      const oldTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER) + 1);
+      data.xp += amount;
+      const newTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER) + 1);
+      saveBpData(data);
+      // Update menu badge
+      const badge = document.getElementById('bp-tier-badge');
+      if (badge) badge.textContent = 'T' + newTier;
+      // Tier-up notification
+      if (newTier > oldTier && gameState.active) {
+        showBpRewardNotif(`🎟️ BATTLE PASS TIER ${newTier}! Reward ready to claim!`);
+        playSound('levelup');
+      }
+    }
+
+    function claimBpTier(tierNum) {
+      const data = getBpData();
+      const currentTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER) + 1) - 1; // unlocked = tier below current
+      // Tier 1 is reachable at 0 XP, so currentTier represents fully completed tiers; allow claim of tier <= current+1 if they have enough XP
+      const unlockedTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER));
+      if (tierNum > unlockedTier) return false; // not yet unlocked
+      if (data.claimed.includes(tierNum)) return false; // already claimed
+      const reward = BP_REWARDS.find(r => r.tier === tierNum);
+      if (!reward) return false;
+
+      // Apply the reward to permanent bonuses
+      if (reward.type === 'maxhp') data.bonuses.maxhp += reward.value;
+      else if (reward.type === 'speed') data.bonuses.speed += reward.value;
+      else if (reward.type === 'damage') data.bonuses.damage += reward.value;
+      else if (reward.type === 'cooldown') data.bonuses.cooldown += reward.value;
+      else if (reward.type === 'magnet') data.bonuses.magnet += reward.value;
+      else if (reward.type === 'startxp') data.bonuses.startxp += reward.value;
+      else if (reward.type === 'title') {
+        if (!data.titles.includes(reward.value)) data.titles.push(reward.value);
+      }
+
+      data.claimed.push(tierNum);
+      saveBpData(data);
+      showBpRewardNotif(`✨ Claimed Tier ${tierNum}: ${reward.name}!`);
+      playSound('powerup');
+      return true;
+    }
+
+    function claimAllBp() {
+      const data = getBpData();
+      const unlockedTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER));
+      let claimedCount = 0;
+      for (let t = 1; t <= unlockedTier; t++) {
+        if (!data.claimed.includes(t)) {
+          if (claimBpTier(t)) claimedCount++;
+        }
+      }
+      if (claimedCount > 0) {
+        showBpRewardNotif(`🎁 Claimed ${claimedCount} reward${claimedCount > 1 ? 's' : ''}!`);
+      }
+      renderBattlePass();
+    }
+
+    function showBpRewardNotif(text) {
+      let stack = document.getElementById('bp-notif-stack');
+      if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'bp-notif-stack';
+        stack.className = 'fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none';
+        document.body.appendChild(stack);
+      }
+      const popup = document.createElement('div');
+      popup.className = 'bp-reward-notif glassmorphism border-2 border-amber-500/60 bg-gradient-to-r from-amber-950/80 to-orange-950/80 px-5 py-3 rounded-xl shadow-[0_0_30px_rgba(245,158,11,0.5)] flex items-center gap-2';
+      popup.innerHTML = `<span class="text-2xl">🎟️</span><span class="font-display font-extrabold text-sm text-amber-200">${text}</span>`;
+      stack.appendChild(popup);
+      setTimeout(() => popup.remove(), 5000);
+    }
+
+    function renderBattlePass() {
+      const data = getBpData();
+      const unlockedTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER));
+      const currentTier = Math.min(BP_MAX_TIER, Math.floor(data.xp / BP_XP_PER_TIER) + 1);
+      const xpInTier = data.xp % BP_XP_PER_TIER;
+      const xpRemaining = BP_XP_PER_TIER - xpInTier;
+      const pct = (xpInTier / BP_XP_PER_TIER) * 100;
+
+      // Stats summary
+      document.getElementById('bp-current-tier').textContent = currentTier;
+      document.getElementById('bp-xp-text').textContent = `${xpInTier} / ${BP_XP_PER_TIER} XP`;
+      document.getElementById('bp-xp-remaining').textContent = xpRemaining.toLocaleString();
+      document.getElementById('bp-progress-bar').style.width = pct + '%';
+      document.getElementById('bp-stat-claimed').textContent = data.claimed.length;
+      document.getElementById('bp-stat-unclaimed').textContent = Math.max(0, unlockedTier - data.claimed.length);
+      document.getElementById('bp-stat-locked').textContent = BP_MAX_TIER - unlockedTier;
+
+      // Update menu badge
+      const badge = document.getElementById('bp-tier-badge');
+      if (badge) badge.textContent = 'T' + currentTier;
+
+      // Render tier grid
+      const grid = document.getElementById('bp-tier-grid');
+      grid.innerHTML = '';
+      BP_REWARDS.forEach(reward => {
+        const card = document.createElement('div');
+        const isClaimed = data.claimed.includes(reward.tier);
+        const isReady = reward.tier <= unlockedTier && !isClaimed;
+        const isLocked = reward.tier > unlockedTier;
+
+        card.className = `bp-tier ${reward.rarity || 'common'} ${isClaimed ? 'claimed' : isReady ? 'ready' : 'locked'}`;
+        const statusText = isClaimed ? '✅ CLAIMED' : isReady ? '⚡ READY!' : `LV ${reward.tier}`;
+        const statusColor = isClaimed ? 'text-emerald-400' : isReady ? 'text-amber-300' : 'text-slate-500';
+
+        card.innerHTML = `
+          <div class="bp-tier-num">TIER ${reward.tier}</div>
+          <div class="bp-tier-icon">${reward.icon}</div>
+          <div class="bp-tier-name">${reward.name}</div>
+          <div class="bp-tier-status ${statusColor}">${statusText}</div>
+        `;
+        if (isReady) {
+          card.addEventListener('click', () => {
+            claimBpTier(reward.tier);
+            renderBattlePass();
+          });
+          card.title = 'Click to claim: ' + reward.desc;
+        } else if (isClaimed || isLocked) {
+          card.title = reward.desc;
+        }
+        grid.appendChild(card);
+      });
+    }
+
+    // Wire up battle pass buttons
+    document.getElementById('btn-battlepass').addEventListener('click', () => {
+      renderBattlePass();
+      document.getElementById('modal-battlepass').classList.remove('hidden');
+    });
+    document.getElementById('btn-close-battlepass').addEventListener('click', () => {
+      document.getElementById('modal-battlepass').classList.add('hidden');
+    });
+    document.getElementById('btn-claim-all').addEventListener('click', claimAllBp);
+
+    // Initialize tier badge on load
+    {
+      const initBadge = document.getElementById('bp-tier-badge');
+      if (initBadge) initBadge.textContent = 'T' + getBpTier();
+    }
 
     // ===================== PROMO CODES & ADMIN SYSTEM =====================
     const REDEEM_CODES = {
@@ -4257,7 +4743,7 @@
             })();
             break;
           case 'reset-all-stats':
-            if (confirm('💥 NUCLEAR RESET — wipe EVERY saved value (achievements, high scores, leaderboard, name, codes, admin, season, redeemed)? This cannot be undone!')) {
+            if (confirm('💥 NUCLEAR RESET — wipe EVERY saved value on THIS DEVICE (achievements, high scores, name, codes, admin, season, redeemed)? This cannot be undone!')) {
               // Wipe ALL spellweaver_* localStorage keys
               const keys = [];
               for (let i = 0; i < localStorage.length; i++) {
@@ -4266,8 +4752,143 @@
               }
               keys.forEach(k => localStorage.removeItem(k));
               gameState.achievementsUnlocked = [];
-              showAdminFeedback('💥 ALL STATS RESET — reloading...', 'green');
+              gameState.highScore = 0;
+              gameState.highTime = '00:00';
+              gameState.highWave = 1;
+              showAdminFeedback('💥 ALL LOCAL STATS RESET — reloading...', 'green');
               setTimeout(() => location.reload(), 1500);
+            }
+            break;
+          case 'nuclear-wipe-leaderboard':
+            if (confirm('☢️ NUCLEAR LEADERBOARD WIPE\n\nThis will:\n  1. 🕒 Set GLOBAL CUTOFF (instantly hides everyone\'s old entries)\n  2. ⏸️ Pause saving\n  3. 💥 Delete entries (3 passes)\n  4. 🧹 Clear local cache\n  5. ▶️ Re-enable saving\n\nALL players worldwide will see an empty leaderboard immediately.\n\nClick OK to nuke.')) {
+              if (!window.firebaseReady) {
+                showAdminFeedback('❌ Firebase not connected', 'red');
+                return;
+              }
+              (async () => {
+                // STEP 1: Set the global cutoff timestamp (THIS IS THE NUCLEAR OPTION)
+                // Even if delete fails, this hides all old entries from everyone
+                showAdminFeedback('🕒 Step 1/5: Setting global cutoff timestamp...', 'green');
+                let cutoffOk = false;
+                if (window.fbSetLbResetTime) {
+                  const ts = await window.fbSetLbResetTime();
+                  cutoffOk = ts > 0;
+                }
+                // Force-refresh local cache so this client sees empty immediately
+                window._lbCachedCutoff = Date.now();
+                window._lbCutoffFetchTime = Date.now();
+                await new Promise(r => setTimeout(r, 500));
+
+                // STEP 2: Pause saving
+                window.leaderboardSavingPaused = true;
+                showAdminFeedback('⏸️ Step 2/5: Saving paused...', 'green');
+                await new Promise(r => setTimeout(r, 400));
+
+                // STEP 3: Try to delete entries (best effort — cutoff already hides them)
+                let totalWiped = 0;
+                let lastMethod = '';
+                let lastError = '';
+                if (window.fbWipeLeaderboard) {
+                  for (let pass = 1; pass <= 3; pass++) {
+                    showAdminFeedback(`💥 Step 3/5: Delete pass ${pass}/3...`, 'green');
+                    const result = await window.fbWipeLeaderboard();
+                    if (result.count > 0) {
+                      totalWiped += result.count;
+                      lastMethod = result.method;
+                    }
+                    if (result.error) lastError = result.error;
+                    await new Promise(r => setTimeout(r, 500));
+                  }
+                }
+
+                // STEP 4: Clear local cache
+                showAdminFeedback('🧹 Step 4/5: Clearing local cache...', 'green');
+                localStorage.removeItem('spellweaver_leaderboard');
+                await new Promise(r => setTimeout(r, 300));
+
+                // STEP 5: Re-enable saving
+                window.leaderboardSavingPaused = false;
+                showAdminFeedback('▶️ Step 5/5: Saving re-enabled', 'green');
+                await new Promise(r => setTimeout(r, 400));
+
+                // Final report
+                if (cutoffOk) {
+                  showAdminFeedback(`☢️ WIPED! Cutoff set + ${totalWiped} deleted (${lastMethod || 'cutoff-only'})`, 'green');
+                  playSound('levelup');
+                } else if (lastError) {
+                  showAdminFeedback(`❌ Wipe failed — ${lastError}`, 'red');
+                  if (lastError.includes('PERMISSION') || lastError.includes('permission')) {
+                    alert('❌ FIRESTORE PERMISSION DENIED\n\nYour rules block writes. Open:\nhttps://console.firebase.google.com/project/spellweaver-f5ca2/firestore/rules\n\nReplace ALL rules with:\n\nrules_version = \'2\';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /leaderboard/{entry} {\n      allow read, write, delete: if true;\n    }\n    match /config/{doc} {\n      allow read, write: if true;\n    }\n  }\n}\n\nClick PUBLISH, then nuke again.');
+                  }
+                } else {
+                  showAdminFeedback(`☢️ Nuclear wipe complete — ${totalWiped} entries gone`, 'green');
+                  playSound('levelup');
+                }
+
+                // Auto-refresh open leaderboard modal
+                if (!document.getElementById('modal-leaderboard').classList.contains('hidden')) {
+                  await renderLeaderboard();
+                }
+              })();
+            }
+            break;
+          case 'wipe-global-leaderboard':
+            if (confirm('🌍 WIPE GLOBAL LEADERBOARD?\n\nThis will erase EVERY player\'s entry from the global leaderboard. ALL players worldwide will see an empty leaderboard. This CANNOT be undone!\n\nClick OK to confirm.')) {
+              if (!window.fbWipeLeaderboard) {
+                showAdminFeedback('❌ Firebase not connected', 'red');
+                return;
+              }
+              showAdminFeedback('🌍 Wiping global leaderboard...', 'green');
+              (async () => {
+                const result = await window.fbWipeLeaderboard();
+                if (result.count >= 0) {
+                  let msg = '';
+                  if (result.method === 'empty') {
+                    msg = '✅ Already empty (0 entries)';
+                  } else if (result.method === 'delete') {
+                    msg = `✅ DELETED ${result.count} entries from global LB!`;
+                  } else if (result.method === 'overwrite') {
+                    msg = `✅ Wiped ${result.count} entries (overwrite — Firestore needs delete rule for true delete)`;
+                  }
+                  showAdminFeedback(msg, 'green');
+                  // Also wipe local cached copy
+                  localStorage.removeItem('spellweaver_leaderboard');
+                  // Auto-refresh the open leaderboard modal if it's visible
+                  if (!document.getElementById('modal-leaderboard').classList.contains('hidden')) {
+                    await renderLeaderboard();
+                  }
+                } else {
+                  const err = result.error || 'unknown error';
+                  if (err.includes('permission') || err.includes('PERMISSION')) {
+                    showAdminFeedback('❌ PERMISSION_DENIED — Update Firestore rules! See chat', 'red');
+                    alert('❌ FIRESTORE RULES PROBLEM\n\nYour Firestore rules are blocking writes. Open:\nhttps://console.firebase.google.com/project/spellweaver-f5ca2/firestore/rules\n\nReplace your rules with:\n\nrules_version = \'2\';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /leaderboard/{entry} {\n      allow read, write, delete: if true;\n    }\n    match /config/{doc} {\n      allow read, write: if true;\n    }\n  }\n}\n\nThen click PUBLISH and try again.');
+                  } else {
+                    showAdminFeedback(`❌ Wipe failed: ${err}`, 'red');
+                  }
+                }
+              })();
+            }
+            break;
+          case 'wipe-my-leaderboard':
+            if (confirm('🗑️ Remove your own leaderboard entry from the global leaderboard?')) {
+              const playerName = localStorage.getItem('spellweaver_playername') || 'Anonymous';
+              (async () => {
+                if (window.fbDeleteEntry) {
+                  const ok = await window.fbDeleteEntry(playerName);
+                  if (ok) showAdminFeedback('✅ Your entry removed from global LB', 'green');
+                  else showAdminFeedback('❌ Delete failed — check console', 'red');
+                }
+                // Also remove from local cache
+                try {
+                  const local = JSON.parse(localStorage.getItem('spellweaver_leaderboard') || '[]');
+                  const filtered = local.filter(e => e.name !== playerName);
+                  localStorage.setItem('spellweaver_leaderboard', JSON.stringify(filtered));
+                } catch {}
+                // Refresh open modal
+                if (!document.getElementById('modal-leaderboard').classList.contains('hidden')) {
+                  await renderLeaderboard();
+                }
+              })();
             }
             break;
         }
@@ -4745,14 +5366,18 @@
           // mild safety confirmation handled above for instakill; others just go
         }
 
-        const ok = await window.fbSendCommand(spectatorState.targetId, payload);
-        if (ok) {
+        const result = await window.fbSendCommand(spectatorState.targetId, payload);
+        if (result && result.ok) {
           showSpecCmdFeedback(`✅ Sent: ${cmd}`, 'green');
-          // Visual button flash
           btn.style.transform = 'scale(1.1)';
           setTimeout(() => btn.style.transform = '', 200);
         } else {
-          showSpecCmdFeedback('❌ Send failed', 'red');
+          const errMsg = (result && result.error) || 'Unknown error';
+          if (errMsg.includes('PERMISSION')) {
+            showSpecCmdFeedback(`❌ PERMISSION_DENIED — Add /commands to RTDB rules!`, 'red');
+          } else {
+            showSpecCmdFeedback(`❌ Failed: ${errMsg}`, 'red');
+          }
         }
       });
     });
@@ -5036,13 +5661,26 @@
     // Subscribe to incoming commands once Firebase is ready
     (async () => {
       let tries = 0;
-      while (!window.fbListenCommands && tries < 30) {
+      while (!window.fbListenCommands && tries < 50) {
         await new Promise(r => setTimeout(r, 200));
         tries++;
       }
       if (window.fbListenCommands) {
-        window.fbListenCommands(handleAdminCommand);
-        console.log('🎯 Listening for incoming admin commands...');
+        try {
+          window.fbListenCommands((cmd) => {
+            console.log('🎯 RECEIVED admin command:', cmd);
+            try {
+              handleAdminCommand(cmd);
+            } catch (err) {
+              console.error('❌ Error executing command:', cmd, err);
+            }
+          });
+          console.log('🎯 Now listening for admin commands on session:', window.fbSessionId);
+        } catch (err) {
+          console.error('❌ Failed to subscribe to commands:', err);
+        }
+      } else {
+        console.warn('⚠️ Command listener not available after waiting — RTDB may not be initialized.');
       }
     })();
 
@@ -5118,9 +5756,22 @@
       if (bonusSpeed > 0) p.speed *= (1 + bonusSpeed);
       if (bonusXp > 0) {
         p.xp += bonusXp;
-        // Trigger level-up if it overflows
         if (p.xp >= p.xpNeeded) p.addXp(0);
       }
+
+      // ====== APPLY BATTLE PASS BONUSES ======
+      const bp = getBpData();
+      const b = bp.bonuses || {};
+      if (b.maxhp > 0) { p.maxHp += b.maxhp; p.hp += b.maxhp; }
+      if (b.speed > 0) p.speed *= (1 + b.speed);
+      if (b.damage > 0) p.damageMult *= (1 + b.damage);
+      if (b.cooldown > 0) p.cooldownMult = Math.max(0.2, p.cooldownMult - b.cooldown);
+      if (b.magnet > 0) p.magnetRange += b.magnet;
+      if (b.startxp > 0) {
+        p.xp += b.startxp;
+        if (p.xp >= p.xpNeeded) p.addXp(0);
+      }
+
       updateHUD();
     };
 
@@ -5312,6 +5963,8 @@
             gameState.wave++;
             gameState.lastWaveTime = gameState.time;
             spawnWaveBanner();
+            // Battle Pass XP per wave survived
+            addBpXp(100, 'wave');
 
             // === FINAL WAVE: spawn 10 BOSSES ===
             if (gameState.wave === 50) {
@@ -5416,6 +6069,57 @@
     }
 
     // Triggered at player defeat
+    // Reads fresh values from localStorage, compares to current run, saves if better.
+    // Returns true if a new HIGH SCORE (points) was set this run.
+    function updateHighScores() {
+      let isNewHigh = false;
+
+      // Always read FRESH from localStorage (cached values get stale after admin wipes)
+      const storedHighScore = parseInt(localStorage.getItem('spellweaver_highscore')) || 0;
+      const storedHighTime = localStorage.getItem('spellweaver_hightime') || '00:00';
+      const storedHighWave = parseInt(localStorage.getItem('spellweaver_highwave')) || 1;
+
+      // Score
+      if (gameState.score > storedHighScore) {
+        localStorage.setItem('spellweaver_highscore', gameState.score.toString());
+        gameState.highScore = gameState.score;
+        isNewHigh = true;
+      } else {
+        gameState.highScore = storedHighScore;
+      }
+
+      // Time survived
+      const mins = Math.floor(gameState.time / 60).toString().padStart(2, '0');
+      const secs = (gameState.time % 60).toString().padStart(2, '0');
+      const timeStr = `${mins}:${secs}`;
+      const curMaxSeconds = parseTimeToSeconds(storedHighTime);
+      if (gameState.time > curMaxSeconds) {
+        localStorage.setItem('spellweaver_hightime', timeStr);
+        gameState.highTime = timeStr;
+      } else {
+        gameState.highTime = storedHighTime;
+      }
+
+      // Highest wave
+      if (gameState.wave > storedHighWave) {
+        localStorage.setItem('spellweaver_highwave', gameState.wave.toString());
+        gameState.highWave = gameState.wave;
+      } else {
+        gameState.highWave = storedHighWave;
+      }
+
+      // Sync the menu UI
+      const sScore = document.getElementById('stat-high-score');
+      const sTime = document.getElementById('stat-high-time');
+      const sWave = document.getElementById('stat-high-wave');
+      if (sScore) sScore.textContent = gameState.highScore.toLocaleString() + ' pts';
+      if (sTime) sTime.textContent = gameState.highTime;
+      if (sWave) sWave.textContent = 'Wave ' + gameState.highWave;
+
+      console.log('🏆 High Score check — Score:', gameState.score, 'vs stored:', storedHighScore, '| isNew:', isNewHigh);
+      return isNewHigh;
+    }
+
     function endGame() {
       stopGame();
       playSound('gameover');
@@ -5425,41 +6129,20 @@
         submitToLeaderboard({
           win: false,
           level: gameState.player.level,
-          xp: gameState.player.xp + (gameState.player.level * 100),
+          xp: Math.round(gameState.player.totalXpEarned || gameState.player.xp || 0),
           kills: gameState.kills,
           score: gameState.score,
           class: gameState.classSelected
         });
       }
 
-      // Update Local storage high scores
-      let isNewHigh = false;
-      if (gameState.score > gameState.highScore) {
-        gameState.highScore = gameState.score;
-        localStorage.setItem('spellweaver_highscore', gameState.score);
-        isNewHigh = true;
-      }
-
+      // Update Local storage high scores (read FRESH from localStorage, don't trust cached values)
+      const isNewHigh = updateHighScores();
       const mins = Math.floor(gameState.time / 60).toString().padStart(2, '0');
       const secs = (gameState.time % 60).toString().padStart(2, '0');
       const timeStr = `${mins}:${secs}`;
-      
-      // Update highest surviving periods
-      const curMaxSeconds = parseTimeToSeconds(gameState.highTime);
-      if (gameState.time > curMaxSeconds) {
-        gameState.highTime = timeStr;
-        localStorage.setItem('spellweaver_hightime', timeStr);
-      }
 
-      if (gameState.wave > gameState.highWave) {
-        gameState.highWave = gameState.wave;
-        localStorage.setItem('spellweaver_highwave', gameState.wave);
-      }
-
-      // Sync menu scores displays
-      document.getElementById('stat-high-score').textContent = gameState.highScore.toLocaleString() + ' pts';
-      document.getElementById('stat-high-time').textContent = gameState.highTime;
-      document.getElementById('stat-high-wave').textContent = 'Wave ' + gameState.highWave;
+      // (Menu UI already synced inside updateHighScores)
 
       // Bind data labels to Gameover screens
       document.getElementById('go-stat-score').textContent = gameState.score.toLocaleString();
@@ -5614,12 +6297,18 @@
     // === VICTORY ===
     function triggerVictory() {
       stopGame();
-      
+
+      // Battle Pass: huge XP boost for winning!
+      addBpXp(500, 'victory');
+
+      // Update local high scores (was missing — now victory runs count too!)
+      updateHighScores();
+
       // Update leaderboard with final stats
       submitToLeaderboard({
         win: true,
         level: gameState.player.level,
-        xp: gameState.player.xp + (gameState.player.level * 100),
+        xp: Math.round(gameState.player.totalXpEarned || gameState.player.xp || 0),
         kills: gameState.kills,
         score: gameState.score,
         class: gameState.classSelected
