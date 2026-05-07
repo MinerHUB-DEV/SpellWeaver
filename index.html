@@ -10,6 +10,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getFirestore, collection, query, orderBy, limit, getDocs, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getDatabase, ref, set, onValue, remove, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
     // ⚠️ TODO: Replace these placeholder values with your actual Firebase config
     // Get them from: https://console.firebase.google.com → Project Settings → Your apps → SDK setup
@@ -75,6 +76,120 @@
             return false;
           }
         };
+
+        // === SEASON START TIME (synced globally via Firestore) ===
+        window.fbGetSeasonStart = async function() {
+          try {
+            const ref = doc(db, "config", "season");
+            const snap = await getDoc(ref);
+            if (snap.exists() && snap.data().startTime) {
+              return snap.data().startTime;
+            }
+            // First time ever — initialize season start globally
+            const now = Date.now();
+            await setDoc(ref, { startTime: now, season: 1 });
+            return now;
+          } catch (err) {
+            console.warn("Season fetch failed", err);
+            return null;
+          }
+        };
+        window.fbResetSeason = async function() {
+          try {
+            const ref = doc(db, "config", "season");
+            const now = Date.now();
+            await setDoc(ref, { startTime: now, season: 1, resetAt: now });
+            return now;
+          } catch (err) { console.warn("Season reset failed", err); return null; }
+        };
+
+        // === REALTIME DATABASE (live sessions for admin spectator) ===
+        try {
+          const rtdb = getDatabase(app);
+          window.firebaseRtdb = rtdb;
+
+          // Generate unique session ID for this browser tab
+          const sessionId = 'sess_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+          window.fbSessionId = sessionId;
+
+          // Publish a session snapshot
+          let _publishOk = false;
+          let _publishErrLogged = false;
+          window.fbPublishSession = async function(snap) {
+            try {
+              const sref = ref(rtdb, 'sessions/' + sessionId);
+              await set(sref, { ...snap, sessionId, updatedAt: Date.now() });
+              if (!_publishOk) {
+                console.log('✅ Session published successfully:', sessionId);
+                _publishOk = true;
+              }
+              // Auto-cleanup if browser closes
+              onDisconnect(sref).remove();
+            } catch (err) {
+              if (!_publishErrLogged) {
+                console.error('❌ Publish session FAILED:', err.message, err.code);
+                console.error('💡 Fix: Go to Firebase Console → Realtime Database → Rules and publish the rules I gave you.');
+                _publishErrLogged = true;
+              }
+            }
+          };
+
+          // Remove this session immediately (when player dies / quits)
+          window.fbEndSession = async function() {
+            try {
+              await remove(ref(rtdb, 'sessions/' + sessionId));
+            } catch (err) {}
+          };
+
+          // Subscribe to all active sessions (admin spectator)
+          window.fbSubscribeSessions = function(callback, errorCallback) {
+            const sref = ref(rtdb, 'sessions');
+            return onValue(sref, (snapshot) => {
+              const data = snapshot.val() || {};
+              // Filter out stale sessions (no update in 30s)
+              const now = Date.now();
+              const fresh = Object.values(data).filter(s => s && s.updatedAt && (now - s.updatedAt) < 30000);
+              callback(fresh, data);
+            }, (err) => {
+              console.error('❌ Subscribe error:', err);
+              if (errorCallback) errorCallback(err);
+            });
+          };
+
+          // Test connection: try to write a test value, then read it back
+          window.fbTestRtdb = async function() {
+            const result = { write: null, read: null, error: null };
+            try {
+              const testRef = ref(rtdb, 'sessions/__test_' + Date.now());
+              await set(testRef, { test: true, updatedAt: Date.now(), name: 'connection_test', x: 0, y: 0 });
+              result.write = 'OK';
+              // Clean up
+              await remove(testRef);
+              // Try a read of /sessions
+              return new Promise((resolve) => {
+                const sref = ref(rtdb, 'sessions');
+                const unsub = onValue(sref, (snap) => {
+                  result.read = 'OK (' + (snap.numChildren ? snap.numChildren() : 0) + ' nodes)';
+                  unsub();
+                  resolve(result);
+                }, (err) => {
+                  result.read = 'FAIL';
+                  result.error = err.message + ' [' + err.code + ']';
+                  resolve(result);
+                });
+                setTimeout(() => { unsub(); resolve(result); }, 4000);
+              });
+            } catch (err) {
+              result.write = 'FAIL';
+              result.error = err.message + ' [' + (err.code || 'unknown') + ']';
+              return result;
+            }
+          };
+
+          console.log("🌐 Realtime DB connected — live spectator enabled. Session:", sessionId);
+        } catch (err) {
+          console.warn("Realtime DB init failed:", err);
+        }
 
         console.log("🔥 Firebase connected — global leaderboards active!");
       } catch (err) {
@@ -284,6 +399,42 @@
       max-width: 600px;
       z-index: 22;
     }
+    /* Admin Panel buttons */
+    .admin-btn {
+      padding: 8px 10px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(100, 116, 139, 0.3);
+      border-radius: 8px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      color: #e2e8f0;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: left;
+      letter-spacing: 0.05em;
+    }
+    .admin-btn:hover {
+      background: rgba(168, 85, 247, 0.15);
+      border-color: rgba(168, 85, 247, 0.5);
+      transform: translateY(-1px);
+    }
+    .admin-btn:active {
+      transform: scale(0.97);
+    }
+    .admin-btn.active {
+      background: rgba(34, 197, 94, 0.2);
+      border-color: rgba(34, 197, 94, 0.6);
+      color: #86efac;
+    }
+    .admin-btn-danger {
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+    .admin-btn-danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.6);
+    }
   </style>
 </head>
 <body class="text-slate-100 select-none overflow-hidden w-screen h-screen">
@@ -303,9 +454,20 @@
             ✨ WEB AUDIO SYNTH ACTIVE
           </span>
         </div>
-        <div class="flex gap-3">
+        <div class="flex gap-3 flex-wrap items-center">
+          <!-- Season Countdown Banner -->
+          <div id="season-banner" class="px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-amber-600/30 via-orange-500/30 to-red-500/30 border-2 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.25)] animate-pulse">
+            <span class="text-base">⚡</span>
+            <div class="flex flex-col leading-tight">
+              <span class="text-[9px] text-amber-300 tracking-widest uppercase">Season 1 Ends</span>
+              <span id="season-countdown" class="text-amber-100 text-sm font-extrabold tracking-wider">30d 00h</span>
+            </div>
+          </div>
           <button id="btn-leaderboard" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
             🏆 Leaderboard
+          </button>
+          <button id="btn-menu-admin" class="hidden glassmorphism hover:bg-rose-900/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer items-center gap-1.5 border border-rose-500/40 bg-rose-950/30 text-rose-300">
+            👑 Admin
           </button>
           <button id="btn-how-to" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
             📖 How To Play
@@ -578,6 +740,9 @@
             <button id="hud-btn-pause" class="glassmorphism hover:bg-slate-800/50 p-2.5 rounded-xl transition border border-slate-700 cursor-pointer" onclick="pauseGame()">
               ⏸️ PAUSE
             </button>
+            <button id="hud-btn-admin" class="hidden glassmorphism hover:bg-rose-900/50 p-2.5 rounded-xl transition border border-rose-500/40 bg-rose-950/30 cursor-pointer" title="Admin Panel">
+              👑
+            </button>
           </div>
         </div>
 
@@ -655,10 +820,146 @@
               </select>
             </div>
           </div>
+
+          <!-- Promo Codes / Redeem Section -->
+          <div class="bg-gradient-to-br from-indigo-950/40 to-purple-950/40 border-2 border-indigo-500/30 p-3 rounded-xl">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">🎟️</span>
+              <p class="font-display text-sm font-extrabold text-indigo-300 tracking-wider uppercase">Redeem Code</p>
+              <span id="admin-badge" class="hidden ml-auto text-[9px] font-display px-2 py-0.5 rounded bg-rose-500/30 border border-rose-500/40 text-rose-200 font-extrabold tracking-widest">👑 ADMIN</span>
+            </div>
+            <p class="text-[10px] text-slate-400 mb-2">Enter a secret code to unlock special rewards or features.</p>
+            <div class="flex gap-2">
+              <input id="code-input" type="text" placeholder="ENTER CODE..." class="flex-1 bg-slate-950 text-indigo-200 text-sm font-display font-bold border border-indigo-700/50 rounded-lg px-3 py-2 outline-none focus:border-indigo-400 placeholder:text-slate-600 placeholder:font-normal placeholder:text-xs uppercase tracking-wider" />
+              <button id="btn-redeem-code" class="text-xs font-display font-black px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-400 hover:to-purple-400 rounded-lg transition cursor-pointer shadow-lg tracking-widest text-white">REDEEM</button>
+            </div>
+            <div id="code-feedback" class="hidden mt-2 text-[11px] font-display text-center py-1.5 rounded"></div>
+          </div>
         </div>
 
         <button id="btn-save-settings" class="w-full py-3 bg-purple-600 hover:bg-purple-500 transition text-white rounded-xl font-display font-semibold tracking-wider text-sm cursor-pointer shadow-lg shadow-purple-900/20">
           APPLY CHANGES
+        </button>
+      </div>
+    </div>
+
+    <!-- 11. NAME PROMPT MODAL (forced before first play) -->
+    <div id="modal-nameprompt" class="hidden absolute inset-0 bg-slate-950/95 backdrop-blur-md z-[60] flex justify-center items-center p-4">
+      <div class="glassmorphism w-full max-w-md rounded-2xl p-6 border-2 border-amber-500/50 flex flex-col gap-4 shadow-[0_0_50px_rgba(245,158,11,0.2)] relative overflow-hidden">
+        <div class="absolute -right-10 -top-10 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl"></div>
+        <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl"></div>
+        <div class="text-center relative z-10">
+          <div class="text-5xl mb-2">⚔️</div>
+          <h3 class="font-fantasy font-extrabold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-orange-400 tracking-wide">CHOOSE YOUR NAME</h3>
+          <p class="text-xs text-slate-400 mt-1">Before entering the realm, declare your mage name. It will appear on the global leaderboard forever.</p>
+        </div>
+        <div class="relative z-10 flex flex-col gap-2">
+          <input id="prompt-name-input" type="text" maxlength="20" placeholder="Enter your name..." class="w-full bg-slate-950 text-amber-200 text-lg font-display font-bold border-2 border-amber-700/50 rounded-lg px-4 py-3 outline-none focus:border-amber-400 focus:shadow-[0_0_20px_rgba(245,158,11,0.4)] transition placeholder:text-slate-600 placeholder:font-normal placeholder:text-sm text-center" />
+          <p id="prompt-name-error" class="hidden text-[11px] text-rose-400 text-center font-display">Please enter at least 2 characters</p>
+        </div>
+        <button id="btn-confirm-name" class="relative z-10 w-full py-3.5 bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-white rounded-xl font-display font-black tracking-widest text-sm cursor-pointer shadow-lg shadow-amber-900/30 transition hover:scale-[1.02] active:scale-95">
+          ⚔️ CONFIRM & ENTER
+        </button>
+        <p class="relative z-10 text-[10px] text-slate-500 text-center">You can change your name later in the 🏆 Leaderboard menu.</p>
+      </div>
+    </div>
+
+    <!-- 10. ADMIN PANEL MODAL -->
+    <div id="modal-admin" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex justify-center items-center p-4">
+      <div class="glassmorphism w-full max-w-lg rounded-2xl p-5 border-2 border-rose-500/40 flex flex-col gap-4 max-h-[92vh] overflow-y-auto shadow-[0_0_50px_rgba(239,68,68,0.2)]">
+        <div class="flex justify-between items-center border-b border-rose-900/30 pb-3">
+          <h3 class="font-display font-extrabold text-lg text-rose-400 flex items-center gap-2">👑 ADMIN PANEL</h3>
+          <button id="btn-close-admin" class="text-slate-400 hover:text-white transition cursor-pointer text-xl">✕</button>
+        </div>
+        <p class="text-[11px] text-rose-300/80 text-center bg-rose-950/30 border border-rose-800/30 rounded p-2 font-display tracking-wider">⚠️ DEVELOPER MODE — Use cheats responsibly</p>
+
+        <!-- Player Cheats -->
+        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-3">
+          <p class="font-display text-xs uppercase tracking-widest text-rose-400 font-bold mb-2">🧙 Player Boosts</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="admin-btn" data-action="god-mode">🛡️ Toggle God Mode</button>
+            <button class="admin-btn" data-action="full-heal">💚 Full Heal</button>
+            <button class="admin-btn" data-action="max-level">⭐ Max Level (25)</button>
+            <button class="admin-btn" data-action="all-spells">🔮 Unlock All Spells</button>
+            <button class="admin-btn" data-action="speed-boost">⚡ Mega Speed</button>
+            <button class="admin-btn" data-action="dmg-boost">💥 1000% Damage</button>
+          </div>
+        </div>
+
+        <!-- World Cheats -->
+        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-3">
+          <p class="font-display text-xs uppercase tracking-widest text-rose-400 font-bold mb-2">🌍 World Controls</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="admin-btn" data-action="kill-all">💀 Kill All Enemies</button>
+            <button class="admin-btn" data-action="spawn-boss">👁️ Spawn Boss</button>
+            <button class="admin-btn" data-action="skip-wave">⏭️ Skip to Wave +5</button>
+            <button class="admin-btn" data-action="trigger-final">👑 Trigger Final Wave</button>
+            <button class="admin-btn" data-action="add-xp">✨ +1000 XP</button>
+            <button class="admin-btn" data-action="magnet-all">🧲 Pull All Gems</button>
+          </div>
+        </div>
+
+        <!-- Achievements / Data -->
+        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-3">
+          <p class="font-display text-xs uppercase tracking-widest text-rose-400 font-bold mb-2">📊 Data & Achievements</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="admin-btn" data-action="unlock-all-ach">🏅 Unlock All Achievements</button>
+            <button class="admin-btn" data-action="boost-leaderboard">🏆 Boost My Leaderboard</button>
+            <button class="admin-btn" data-action="reset-ach">🔄 Reset Achievements</button>
+            <button class="admin-btn" data-action="reset-season">📅 Reset Season Timer</button>
+          </div>
+        </div>
+
+        <!-- LIVE SPECTATOR -->
+        <div class="bg-slate-900/40 border border-purple-500/30 rounded-xl p-3">
+          <div class="flex justify-between items-center mb-2">
+            <p class="font-display text-xs uppercase tracking-widest text-purple-300 font-bold flex items-center gap-1.5">
+              <span class="w-2 h-2 bg-rose-500 rounded-full animate-pulse"></span> LIVE PLAYER SESSIONS
+            </p>
+            <span id="spec-count" class="text-[10px] font-display px-2 py-0.5 rounded bg-purple-950/40 border border-purple-800/40 text-purple-300">0 online</span>
+          </div>
+          <p class="text-[10px] text-slate-500 mb-2">Click a player to spectate them in real-time.</p>
+          <!-- Diagnostic Status Bar -->
+          <div id="spec-diag" class="text-[10px] font-display tracking-wider text-center py-1.5 rounded mb-2 bg-slate-900/60 border border-slate-800 text-slate-400">
+            🔌 Click "TEST CONNECTION" to diagnose
+          </div>
+          <div id="spec-list" class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+            <div class="text-center text-[11px] text-slate-500 py-3 italic">Click "Start Live Feed" to load sessions...</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 mt-2">
+            <button id="btn-spec-test" class="text-[10px] font-display font-bold py-2 bg-amber-700/30 hover:bg-amber-600/40 border border-amber-500/40 rounded-lg cursor-pointer transition text-amber-200">
+              🔌 TEST CONNECTION
+            </button>
+            <button id="btn-spec-refresh" class="text-[10px] font-display font-bold py-2 bg-purple-700/30 hover:bg-purple-600/40 border border-purple-500/40 rounded-lg cursor-pointer transition text-purple-200">
+              🔄 START LIVE FEED
+            </button>
+          </div>
+
+          <!-- Active spectator view -->
+          <div id="spec-view" class="hidden mt-3 bg-slate-950/60 border border-purple-500/40 rounded-lg p-2">
+            <div class="flex justify-between items-center mb-1">
+              <div class="font-display font-extrabold text-sm text-purple-200" id="spec-target-name">—</div>
+              <button id="btn-spec-close" class="text-[10px] text-slate-400 hover:text-rose-400 cursor-pointer">✕ STOP</button>
+            </div>
+            <canvas id="spec-canvas" width="280" height="160" class="w-full rounded bg-slate-950 border border-slate-800"></canvas>
+            <div id="spec-stats" class="grid grid-cols-3 gap-1 mt-2 text-[10px] font-display">
+              <!-- stats fill dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <div id="admin-feedback" class="hidden text-center text-[11px] font-display py-2 rounded"></div>
+
+        <!-- DANGER ZONE -->
+        <div class="border-2 border-rose-500/40 rounded-xl p-3 bg-rose-950/10">
+          <p class="font-display text-[10px] uppercase tracking-widest text-rose-400 font-bold mb-2 text-center">⚠️ DANGER ZONE ⚠️</p>
+          <button class="admin-btn admin-btn-danger w-full" data-action="reset-all-stats" style="text-align: center; padding: 12px; font-size: 12px;">
+            💥 RESET ALL STATS (WIPE EVERYTHING)
+          </button>
+        </div>
+
+        <button id="btn-revoke-admin" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 transition text-slate-300 rounded-lg font-display text-xs cursor-pointer tracking-wider">
+          🚪 REVOKE ADMIN ACCESS
         </button>
       </div>
     </div>
@@ -934,11 +1235,20 @@
           <button class="lb-tab flex-1 py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded transition" data-tab="kills">💀 Most Kills</button>
         </div>
 
-        <!-- Player name input -->
-        <div class="flex gap-2 items-center bg-slate-900/40 p-2 rounded-lg border border-slate-800">
-          <span class="text-xs text-slate-400 font-display">Your Mage Name:</span>
-          <input id="leaderboard-name" type="text" maxlength="14" placeholder="Anonymous" class="flex-1 bg-slate-950 text-amber-300 text-xs border border-slate-700 rounded p-1.5 px-2 font-display outline-none focus:border-amber-500" />
-          <button id="btn-save-name" class="text-[10px] font-display font-bold px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded transition cursor-pointer">SAVE</button>
+        <!-- Player name input — PROMINENT -->
+        <div class="bg-gradient-to-br from-amber-950/40 via-purple-950/30 to-amber-950/40 p-4 rounded-xl border-2 border-amber-500/40 shadow-[0_0_25px_rgba(245,158,11,0.15)] relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl"></div>
+          <div class="absolute -left-8 -bottom-8 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl"></div>
+          <div class="flex items-center gap-2 mb-2 relative z-10">
+            <span class="text-xl">⚔️</span>
+            <label class="font-display font-extrabold text-sm text-amber-300 tracking-widest uppercase">Your Mage Name</label>
+            <span id="name-status-dot" class="ml-auto text-[10px] font-display px-2 py-0.5 rounded-full bg-rose-950/40 border border-rose-500/40 text-rose-300">⚠ NOT SET</span>
+          </div>
+          <div class="flex gap-2 items-center relative z-10">
+            <input id="leaderboard-name" type="text" maxlength="20" placeholder="Enter your name to compete..." class="flex-1 bg-slate-950 text-amber-200 text-base font-display font-bold border-2 border-amber-700/50 rounded-lg px-3 py-2.5 outline-none focus:border-amber-400 focus:shadow-[0_0_15px_rgba(245,158,11,0.3)] transition placeholder:text-slate-600 placeholder:font-normal placeholder:text-sm" />
+            <button id="btn-save-name" class="text-xs font-display font-black px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-lg transition cursor-pointer shadow-lg shadow-amber-900/30 tracking-widest text-white">💾 SAVE</button>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2 relative z-10">Your name will appear globally on the leaderboard. Up to 20 characters.</p>
         </div>
 
         <!-- Leaderboard list -->
@@ -1839,13 +2149,14 @@
 
           // Emit beautiful dust trails based on graphics level
           if (Math.random() < 0.4 && gameState.graphicsQuality !== 'low') {
+            // Trail emits centered behind the player (opposite movement direction)
             gameState.particles.push(new Particle(
-              this.x - (dx / length) * 8, 
-              this.y + 10 + (Math.random() - 0.5) * 5, 
-              -dx * 0.2, 
-              -dy * 0.2, 
-              this.color, 
-              1 + Math.random() * 2, 
+              this.x - (dx / length) * 6 + (Math.random() - 0.5) * 4,
+              this.y - (dy / length) * 6 + (Math.random() - 0.5) * 4,
+              -dx * 0.2,
+              -dy * 0.2,
+              this.color,
+              1 + Math.random() * 2,
               20
             ));
           }
@@ -3054,8 +3365,48 @@
     // Start action adventure trigger
     document.getElementById('btn-start-game').addEventListener('click', () => {
       initAudio();
-      startGame();
+      // Force name prompt if no name set yet
+      const savedName = localStorage.getItem('spellweaver_playername');
+      if (!savedName || !savedName.trim() || savedName === 'Anonymous') {
+        showNamePrompt(() => startGame());
+      } else {
+        startGame();
+      }
     });
+
+    // ===================== FORCED NAME PROMPT =====================
+    function showNamePrompt(onConfirm) {
+      const modal = document.getElementById('modal-nameprompt');
+      const input = document.getElementById('prompt-name-input');
+      const error = document.getElementById('prompt-name-error');
+      const btn = document.getElementById('btn-confirm-name');
+
+      // Pre-fill if there's an existing name
+      input.value = localStorage.getItem('spellweaver_playername') || '';
+      error.classList.add('hidden');
+      modal.classList.remove('hidden');
+      setTimeout(() => input.focus(), 100);
+
+      const confirm = () => {
+        const name = input.value.trim();
+        if (name.length < 2) {
+          error.classList.remove('hidden');
+          input.focus();
+          return;
+        }
+        localStorage.setItem('spellweaver_playername', name);
+        updateNameStatusDot();
+        modal.classList.add('hidden');
+        playSound('powerup');
+        if (onConfirm) onConfirm();
+      };
+
+      // Replace btn handler each time so we don't stack listeners
+      btn.onclick = confirm;
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') confirm();
+      };
+    }
 
     // Pause functionality
     function pauseGame() {
@@ -3276,8 +3627,22 @@
     function openLeaderboard() {
       const savedName = localStorage.getItem('spellweaver_playername') || '';
       document.getElementById('leaderboard-name').value = savedName;
+      updateNameStatusDot();
       setLbTab('level');
       document.getElementById('modal-leaderboard').classList.remove('hidden');
+    }
+
+    function updateNameStatusDot() {
+      const dot = document.getElementById('name-status-dot');
+      if (!dot) return;
+      const name = localStorage.getItem('spellweaver_playername');
+      if (name && name.trim() && name !== 'Anonymous') {
+        dot.textContent = '✓ SAVED';
+        dot.className = 'ml-auto text-[10px] font-display px-2 py-0.5 rounded-full bg-emerald-950/40 border border-emerald-500/40 text-emerald-300';
+      } else {
+        dot.textContent = '⚠ NOT SET';
+        dot.className = 'ml-auto text-[10px] font-display px-2 py-0.5 rounded-full bg-rose-950/40 border border-rose-500/40 text-rose-300 animate-pulse';
+      }
     }
 
     async function setLbTab(tab) {
@@ -3304,17 +3669,632 @@
     document.getElementById('btn-save-name').addEventListener('click', () => {
       const name = document.getElementById('leaderboard-name').value.trim() || 'Anonymous';
       localStorage.setItem('spellweaver_playername', name);
+      updateNameStatusDot();
       // Visual confirmation
       const btn = document.getElementById('btn-save-name');
-      const orig = btn.textContent;
-      btn.textContent = '✓ SAVED';
+      const orig = btn.innerHTML;
+      btn.innerHTML = '✓ SAVED';
       btn.classList.add('bg-emerald-500');
       setTimeout(() => {
-        btn.textContent = orig;
+        btn.innerHTML = orig;
         btn.classList.remove('bg-emerald-500');
       }, 1200);
       renderLeaderboard();
     });
+
+    // ===================== PROMO CODES & ADMIN SYSTEM =====================
+    const REDEEM_CODES = {
+      'ADMIN_PANEL!': { type: 'admin', message: '👑 ADMIN ACCESS GRANTED!' },
+      'FREEHEALTH': { type: 'reward', message: '+50 Max HP saved for next run!', apply: () => { localStorage.setItem('spellweaver_bonushp', '50'); } },
+      'SPEEDDEMON': { type: 'reward', message: '+15% movement speed bonus saved!', apply: () => { localStorage.setItem('spellweaver_bonusspeed', '0.15'); } },
+      'GIVEMEXP': { type: 'reward', message: 'Next run starts with 500 XP!', apply: () => { localStorage.setItem('spellweaver_bonusxp', '500'); } },
+      'WIPEALL': { type: 'reset', message: 'All local saves wiped!', apply: () => {
+        ['spellweaver_highscore','spellweaver_hightime','spellweaver_highwave','spellweaver_achievements','spellweaver_totalwins','spellweaver_bonushp','spellweaver_bonusspeed','spellweaver_bonusxp'].forEach(k => localStorage.removeItem(k));
+      }}
+    };
+
+    function isAdmin() {
+      return localStorage.getItem('spellweaver_admin') === 'true';
+    }
+
+    function setAdminUI(on) {
+      const badge = document.getElementById('admin-badge');
+      if (badge) badge.classList.toggle('hidden', !on);
+      // Menu admin button (next to Leaderboard)
+      const menuBtn = document.getElementById('btn-menu-admin');
+      if (menuBtn) {
+        if (on) {
+          menuBtn.classList.remove('hidden');
+          menuBtn.classList.add('flex');
+        } else {
+          menuBtn.classList.add('hidden');
+          menuBtn.classList.remove('flex');
+        }
+      }
+      // In-game admin gear icon
+      const hudBtn = document.getElementById('hud-btn-admin');
+      if (hudBtn) hudBtn.classList.toggle('hidden', !on);
+    }
+
+    // Initialize admin badge on load
+    setAdminUI(isAdmin());
+
+    // Bind menu admin button
+    document.getElementById('btn-menu-admin').addEventListener('click', openAdminPanel);
+    // Bind in-game admin gear
+    document.getElementById('hud-btn-admin').addEventListener('click', openAdminPanel);
+
+    function showCodeFeedback(message, color) {
+      const fb = document.getElementById('code-feedback');
+      fb.textContent = message;
+      fb.className = `mt-2 text-[11px] font-display text-center py-2 rounded ${color === 'green' ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300' : color === 'red' ? 'bg-rose-950/40 border border-rose-500/40 text-rose-300' : 'bg-amber-950/40 border border-amber-500/40 text-amber-300'}`;
+      fb.classList.remove('hidden');
+      setTimeout(() => fb.classList.add('hidden'), 3500);
+    }
+
+    document.getElementById('btn-redeem-code').addEventListener('click', () => {
+      const codeInput = document.getElementById('code-input');
+      const code = codeInput.value.trim();
+      if (!code) {
+        showCodeFeedback('⚠️ Enter a code first', 'red');
+        return;
+      }
+      const entry = REDEEM_CODES[code];
+      if (!entry) {
+        showCodeFeedback('❌ Invalid code', 'red');
+        return;
+      }
+
+      // Track redeemed codes (one-time only for non-admin codes)
+      const redeemed = JSON.parse(localStorage.getItem('spellweaver_redeemed') || '[]');
+      if (entry.type !== 'admin' && entry.type !== 'reset' && redeemed.includes(code)) {
+        showCodeFeedback('⚠️ Already redeemed', 'amber');
+        return;
+      }
+
+      // Apply the code
+      if (entry.type === 'admin') {
+        localStorage.setItem('spellweaver_admin', 'true');
+        setAdminUI(true);
+        showCodeFeedback(entry.message, 'green');
+        playSound('levelup');
+        // Auto-open admin panel after a moment
+        setTimeout(() => {
+          document.getElementById('modal-settings').classList.add('hidden');
+          openAdminPanel();
+        }, 1200);
+      } else {
+        if (entry.apply) entry.apply();
+        redeemed.push(code);
+        localStorage.setItem('spellweaver_redeemed', JSON.stringify(redeemed));
+        showCodeFeedback(entry.message, 'green');
+        playSound('powerup');
+      }
+      codeInput.value = '';
+    });
+
+    // ===================== ADMIN PANEL =====================
+    function openAdminPanel() {
+      if (!isAdmin()) {
+        // Don't allow opening without admin
+        return;
+      }
+      document.getElementById('modal-admin').classList.remove('hidden');
+    }
+
+    document.getElementById('btn-close-admin').addEventListener('click', () => {
+      document.getElementById('modal-admin').classList.add('hidden');
+    });
+
+    document.getElementById('btn-revoke-admin').addEventListener('click', () => {
+      localStorage.removeItem('spellweaver_admin');
+      gameState.godMode = false;
+      setAdminUI(false);
+      document.getElementById('modal-admin').classList.add('hidden');
+      playSound('hit');
+    });
+
+    function showAdminFeedback(msg, color) {
+      const fb = document.getElementById('admin-feedback');
+      fb.textContent = msg;
+      fb.className = `text-center text-[11px] font-display py-2 rounded ${color === 'green' ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300' : 'bg-rose-950/40 border border-rose-500/40 text-rose-300'}`;
+      fb.classList.remove('hidden');
+      setTimeout(() => fb.classList.add('hidden'), 2500);
+    }
+
+    document.querySelectorAll('.admin-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        const p = gameState.player;
+
+        switch (action) {
+          case 'god-mode':
+            gameState.godMode = !gameState.godMode;
+            btn.classList.toggle('active', gameState.godMode);
+            showAdminFeedback(gameState.godMode ? '🛡️ GOD MODE ON' : '⚔️ God Mode Off', 'green');
+            break;
+          case 'full-heal':
+            if (p) { p.hp = p.maxHp; updateHUD(); showAdminFeedback('💚 Healed to full!', 'green'); }
+            else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'max-level':
+            if (p) {
+              p.level = 25;
+              p.xp = 0;
+              p.xpNeeded = Math.round(100 * Math.pow(p.level + 1, 1.3));
+              updateHUD();
+              showAdminFeedback('⭐ Level set to 25', 'green');
+            } else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'all-spells':
+            if (p) {
+              p.spells.fireball = 5;
+              p.spells.ice = 5;
+              p.spells.lightning = 5;
+              p.spells.shield = 5;
+              p.spells.singularity = 5;
+              p.spells.tornado = 5;
+              p.spells.tidal = 5;
+              Object.keys(spellRegistry).forEach(k => spellRegistry[k].level = 5);
+              updateHUD();
+              showAdminFeedback('🔮 All spells maxed!', 'green');
+            } else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'speed-boost':
+            if (p) { p.speed += 3; showAdminFeedback('⚡ Mega speed activated!', 'green'); }
+            else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'dmg-boost':
+            if (p) { p.damageMult = 10; showAdminFeedback('💥 1000% damage activated!', 'green'); }
+            else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'kill-all':
+            if (gameState.enemies.length > 0) {
+              gameState.enemies.forEach(e => e.takeDamage(99999, '#ffffff'));
+              showAdminFeedback(`💀 Killed all enemies!`, 'green');
+            } else showAdminFeedback('No enemies to kill', 'red');
+            break;
+          case 'spawn-boss':
+            if (gameState.active) { spawnBoss(); showAdminFeedback('👁️ Boss summoned!', 'green'); }
+            else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'skip-wave':
+            if (gameState.active) {
+              gameState.wave = Math.min(49, gameState.wave + 5);
+              gameState.lastWaveTime = gameState.time;
+              spawnWaveBanner();
+              showAdminFeedback(`⏭️ Jumped to wave ${gameState.wave}`, 'green');
+            } else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'trigger-final':
+            if (gameState.active && !gameState.finalWaveTriggered) {
+              gameState.wave = 50;
+              triggerFinalWave();
+              showAdminFeedback('👑 Final wave triggered!', 'green');
+            } else showAdminFeedback('Cannot trigger now', 'red');
+            break;
+          case 'add-xp':
+            if (p) { p.addXp(1000); showAdminFeedback('✨ +1000 XP added!', 'green'); }
+            else showAdminFeedback('Start a game first', 'red');
+            break;
+          case 'magnet-all':
+            gameState.gems.forEach(g => g.pulled = true);
+            showAdminFeedback('🧲 All gems pulled!', 'green');
+            break;
+          case 'unlock-all-ach':
+            Object.keys(ACHIEVEMENTS).forEach(k => unlockAchievement(k));
+            showAdminFeedback('🏅 All achievements unlocked!', 'green');
+            break;
+          case 'boost-leaderboard':
+            submitToLeaderboard({
+              win: true,
+              level: 99,
+              xp: 99999,
+              kills: 9999,
+              score: 999999,
+              class: gameState.classSelected || 'pyro'
+            });
+            showAdminFeedback('🏆 Leaderboard boosted (99/9999)!', 'green');
+            break;
+          case 'reset-ach':
+            localStorage.removeItem('spellweaver_achievements');
+            gameState.achievementsUnlocked = [];
+            showAdminFeedback('🔄 Achievements reset', 'green');
+            break;
+          case 'reset-season':
+            // Reset season globally via Firestore (everyone sees new countdown)
+            (async () => {
+              if (window.fbResetSeason) {
+                const newStart = await window.fbResetSeason();
+                if (newStart) {
+                  seasonStartCached = newStart;
+                  localStorage.setItem('spellweaver_season_start', newStart.toString());
+                  updateSeasonCountdown();
+                  showAdminFeedback('📅 GLOBAL season reset (everyone sees +30d)', 'green');
+                  return;
+                }
+              }
+              // Local-only fallback
+              const now = Date.now();
+              seasonStartCached = now;
+              localStorage.setItem('spellweaver_season_start', now.toString());
+              updateSeasonCountdown();
+              showAdminFeedback('📅 Local season reset (Firestore offline)', 'green');
+            })();
+            break;
+          case 'reset-all-stats':
+            if (confirm('💥 NUCLEAR RESET — wipe EVERY saved value (achievements, high scores, leaderboard, name, codes, admin, season, redeemed)? This cannot be undone!')) {
+              // Wipe ALL spellweaver_* localStorage keys
+              const keys = [];
+              for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('spellweaver_')) keys.push(k);
+              }
+              keys.forEach(k => localStorage.removeItem(k));
+              gameState.achievementsUnlocked = [];
+              showAdminFeedback('💥 ALL STATS RESET — reloading...', 'green');
+              setTimeout(() => location.reload(), 1500);
+            }
+            break;
+        }
+      });
+    });
+
+    // ===================== SEASON 1 COUNTDOWN (Globally Synced) =====================
+    const SEASON_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    let seasonStartCached = null;
+
+    async function fetchGlobalSeasonStart() {
+      // Try Firestore first (global)
+      if (window.fbGetSeasonStart) {
+        const start = await window.fbGetSeasonStart();
+        if (start) {
+          seasonStartCached = start;
+          localStorage.setItem('spellweaver_season_start', start.toString());
+          return start;
+        }
+      }
+      // Fallback to local
+      let local = parseInt(localStorage.getItem('spellweaver_season_start'));
+      if (!local) {
+        local = Date.now();
+        localStorage.setItem('spellweaver_season_start', local.toString());
+      }
+      seasonStartCached = local;
+      return local;
+    }
+
+    function getSeasonEnd() {
+      const start = seasonStartCached || parseInt(localStorage.getItem('spellweaver_season_start')) || Date.now();
+      return start + SEASON_DURATION_MS;
+    }
+
+    function updateSeasonCountdown() {
+      const end = getSeasonEnd();
+      const remaining = end - Date.now();
+      const banner = document.getElementById('season-banner');
+      const txt = document.getElementById('season-countdown');
+      if (!txt) return;
+
+      if (remaining <= 0) {
+        txt.textContent = 'ENDED!';
+        banner.className = 'px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-rose-600/40 to-red-600/40 border-2 border-rose-500/60 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse';
+        return;
+      }
+
+      const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+      const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+      const mins = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+
+      // Format depending on time left
+      if (days > 0) {
+        txt.textContent = `${days}d ${hours.toString().padStart(2,'0')}h`;
+      } else if (hours > 0) {
+        txt.textContent = `${hours}h ${mins.toString().padStart(2,'0')}m`;
+      } else {
+        const secs = Math.floor((remaining % 60000) / 1000);
+        txt.textContent = `${mins}m ${secs.toString().padStart(2,'0')}s`;
+      }
+
+      // Last 3 days = pulse red
+      if (days < 3) {
+        banner.className = 'px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-rose-600/40 to-orange-500/40 border-2 border-rose-500/60 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse';
+      }
+    }
+
+    // Start countdown ticker — fetch global season start from Firestore
+    (async () => {
+      // Wait briefly for Firebase to initialize
+      let tries = 0;
+      while (!window.firebaseReady && tries < 20) {
+        await new Promise(r => setTimeout(r, 150));
+        tries++;
+      }
+      await fetchGlobalSeasonStart();
+      updateSeasonCountdown();
+    })();
+    setInterval(updateSeasonCountdown, 30000); // refresh every 30s
+    // Re-sync season from server every 5 minutes (in case admin reset it)
+    setInterval(async () => {
+      await fetchGlobalSeasonStart();
+      updateSeasonCountdown();
+    }, 5 * 60 * 1000);
+
+    // ===================== LIVE SPECTATOR SYSTEM =====================
+    const spectatorState = {
+      sessions: [],
+      unsubscribe: null,
+      targetId: null,
+      targetData: null,
+      drawLoopId: null
+    };
+
+    function startLiveFeed() {
+      const btn = document.getElementById('btn-spec-refresh');
+      const list = document.getElementById('spec-list');
+
+      if (!window.fbSubscribeSessions) {
+        list.innerHTML = `
+          <div class="text-[11px] text-rose-400 bg-rose-950/40 border border-rose-800/40 rounded p-3 leading-relaxed">
+            ⚠️ <strong>Realtime DB not connected.</strong><br>
+            Check the browser console (F12) for errors. Most likely cause: RTDB rules not published. Go to:<br>
+            <a href="https://console.firebase.google.com/project/spellweaver-f5ca2/database" target="_blank" class="text-amber-300 underline">Firebase Console → Realtime Database → Rules</a>
+          </div>`;
+        showAdminFeedback('RTDB not connected — see panel', 'red');
+        return;
+      }
+      // Toggle off if already running
+      if (spectatorState.unsubscribe) {
+        spectatorState.unsubscribe();
+        spectatorState.unsubscribe = null;
+        btn.textContent = '🔄 START LIVE FEED';
+        list.innerHTML = '<div class="text-center text-[11px] text-slate-500 py-3 italic">Feed stopped.</div>';
+        return;
+      }
+      btn.textContent = '⏸️ STOP LIVE FEED';
+      list.innerHTML = '<div class="text-center text-[11px] text-purple-400 py-3 italic animate-pulse">📡 Listening for live sessions...</div>';
+
+      setSpecDiag('📡 Subscribed — waiting for live data...', 'amber');
+      try {
+        spectatorState.unsubscribe = window.fbSubscribeSessions((sessions, rawData) => {
+          spectatorState.sessions = sessions;
+          const total = Object.keys(rawData || {}).length;
+          if (sessions.length > 0) {
+            setSpecDiag(`✅ LIVE — ${sessions.length} active player(s) online`, 'green');
+          } else if (total > 0) {
+            setSpecDiag(`⚠️ ${total} stale session(s) found, no LIVE players right now`, 'amber');
+          } else {
+            setSpecDiag(`📡 Connected — waiting for players to join...`, 'amber');
+          }
+          renderSpecList();
+          if (spectatorState.targetId) {
+            const target = sessions.find(s => s.sessionId === spectatorState.targetId);
+            if (target) {
+              spectatorState.targetData = target;
+            } else {
+              stopSpectating();
+            }
+          }
+        }, (err) => {
+          setSpecDiag(`❌ Subscription failed: ${err.code || err.message}<br>Fix your RTDB rules!`, 'red');
+        });
+      } catch (err) {
+        console.error('Spectator subscription error:', err);
+        setSpecDiag(`❌ Subscription threw: ${err.message}`, 'red');
+        list.innerHTML = `
+          <div class="text-[11px] text-rose-400 bg-rose-950/40 border border-rose-800/40 rounded p-3">
+            ❌ <strong>Subscription failed:</strong> ${err.message}<br>
+            Most likely your RTDB rules need to allow read/write on /sessions
+          </div>`;
+      }
+    }
+
+    function renderSpecList() {
+      const list = document.getElementById('spec-list');
+      const count = document.getElementById('spec-count');
+      const sessions = spectatorState.sessions;
+      count.textContent = sessions.length + ' online';
+
+      if (sessions.length === 0) {
+        list.innerHTML = '<div class="text-center text-[11px] text-slate-500 py-3 italic">No players online right now.</div>';
+        return;
+      }
+
+      const classIcons = { pyro: '🔥', cryo: '❄️', storm: '⚡', wind: '🌪️', water: '💧' };
+      list.innerHTML = '';
+      sessions.forEach(s => {
+        const isYou = s.sessionId === window.fbSessionId;
+        const isWatching = s.sessionId === spectatorState.targetId;
+        const row = document.createElement('div');
+        row.className = `flex items-center gap-2 p-2 rounded border ${isWatching ? 'bg-purple-900/40 border-purple-400' : 'bg-slate-900/50 border-slate-800'} text-[11px] cursor-pointer hover:border-purple-500 transition`;
+        row.innerHTML = `
+          <span class="text-base">${classIcons[s.class] || '🔮'}</span>
+          <div class="flex-1 min-w-0">
+            <div class="font-display font-bold text-slate-200 truncate">${s.name}${isYou ? ' <span class="text-[9px] text-amber-400">(YOU)</span>' : ''}</div>
+            <div class="text-[9px] text-slate-500">LV.${s.level} • W${s.wave} • ${s.kills} kills</div>
+          </div>
+          <div class="text-[10px] text-purple-300 font-display font-bold">${isWatching ? '👁️ WATCHING' : '👁️ WATCH'}</div>
+        `;
+        row.addEventListener('click', () => spectate(s));
+        list.appendChild(row);
+      });
+    }
+
+    function spectate(session) {
+      spectatorState.targetId = session.sessionId;
+      spectatorState.targetData = session;
+      document.getElementById('spec-view').classList.remove('hidden');
+      document.getElementById('spec-target-name').textContent = '👁️ ' + session.name;
+      renderSpecList();
+
+      // Start drawing loop
+      if (spectatorState.drawLoopId) cancelAnimationFrame(spectatorState.drawLoopId);
+      const loop = () => {
+        drawSpectatorView();
+        spectatorState.drawLoopId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    function stopSpectating() {
+      spectatorState.targetId = null;
+      spectatorState.targetData = null;
+      document.getElementById('spec-view').classList.add('hidden');
+      if (spectatorState.drawLoopId) cancelAnimationFrame(spectatorState.drawLoopId);
+      renderSpecList();
+    }
+
+    function drawSpectatorView() {
+      const data = spectatorState.targetData;
+      const canvas = document.getElementById('spec-canvas');
+      if (!canvas || !data) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width, h = canvas.height;
+
+      // Background
+      ctx.fillStyle = '#03030c';
+      ctx.fillRect(0, 0, w, h);
+
+      // Grid
+      ctx.strokeStyle = 'rgba(168, 85, 247, 0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < w; i += 30) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke();
+      }
+      for (let j = 0; j < h; j += 30) {
+        ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(w, j); ctx.stroke();
+      }
+
+      const cx = w / 2, cy = h / 2;
+      const scale = 0.25;
+
+      // Draw enemies
+      const classColors = { pyro: '#f87171', cryo: '#22d3ee', storm: '#c084fc', wind: '#34d399', water: '#60a5fa' };
+      (data.enemies || []).forEach(e => {
+        const ex = cx + e.x * scale;
+        const ey = cy + e.y * scale;
+        if (ex < 0 || ex > w || ey < 0 || ey > h) return;
+        if (e.t === 'b') {
+          ctx.fillStyle = '#ec4899';
+          ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.fillStyle = e.t === 'h' ? '#94a3b8' : (e.t === 's' ? '#fb7185' : '#10b981');
+          ctx.fillRect(ex - 2, ey - 2, 4, 4);
+        }
+      });
+
+      // Draw player at center with facing
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(data.facing || 0);
+      ctx.fillStyle = classColors[data.class] || '#a78bfa';
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+      // Direction arrow
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(8, 0); ctx.lineTo(2, -3); ctx.lineTo(2, 3); ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // Live indicator
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath(); ctx.arc(8, 8, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px Orbitron, sans-serif';
+      ctx.fillText('LIVE', 14, 11);
+
+      // Update stats panel
+      const hpPct = Math.round((data.hp / data.maxHp) * 100);
+      document.getElementById('spec-stats').innerHTML = `
+        <div class="bg-rose-950/40 border border-rose-800/40 rounded p-1 text-center"><div class="text-rose-400 font-bold">${hpPct}%</div><div class="text-[8px] text-slate-500">HP</div></div>
+        <div class="bg-purple-950/40 border border-purple-800/40 rounded p-1 text-center"><div class="text-purple-300 font-bold">LV.${data.level}</div><div class="text-[8px] text-slate-500">LEVEL</div></div>
+        <div class="bg-amber-950/40 border border-amber-800/40 rounded p-1 text-center"><div class="text-amber-300 font-bold">W${data.wave}</div><div class="text-[8px] text-slate-500">WAVE</div></div>
+        <div class="bg-slate-900/60 border border-slate-700/40 rounded p-1 text-center"><div class="text-slate-200 font-bold">${data.kills}</div><div class="text-[8px] text-slate-500">KILLS</div></div>
+        <div class="bg-yellow-950/40 border border-yellow-800/40 rounded p-1 text-center"><div class="text-yellow-300 font-bold">${(data.score || 0).toLocaleString()}</div><div class="text-[8px] text-slate-500">SCORE</div></div>
+        <div class="bg-emerald-950/40 border border-emerald-800/40 rounded p-1 text-center"><div class="text-emerald-300 font-bold">${data.enemyCount || 0}</div><div class="text-[8px] text-slate-500">ENEMIES</div></div>
+      `;
+    }
+
+    // Bind spectator buttons
+    document.getElementById('btn-spec-refresh').addEventListener('click', startLiveFeed);
+    document.getElementById('btn-spec-close').addEventListener('click', stopSpectating);
+
+    // ==================== SPECTATOR DIAGNOSTICS ====================
+    function setSpecDiag(html, color = 'slate') {
+      const colorMap = {
+        slate: 'bg-slate-900/60 border-slate-800 text-slate-400',
+        green: 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300',
+        red: 'bg-rose-950/40 border-rose-500/40 text-rose-300',
+        amber: 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+      };
+      const el = document.getElementById('spec-diag');
+      el.className = `text-[10px] font-display tracking-wider text-center py-1.5 rounded mb-2 border ${colorMap[color] || colorMap.slate}`;
+      el.innerHTML = html;
+    }
+
+    document.getElementById('btn-spec-test').addEventListener('click', async () => {
+      setSpecDiag('🔄 Running diagnostic...', 'amber');
+
+      // Step 1: Check Firebase init
+      if (!window.firebaseReady) {
+        setSpecDiag('❌ Firebase not initialized<br>Status: ' + (window.firebaseStatus || 'unknown'), 'red');
+        return;
+      }
+
+      // Step 2: Check RTDB helpers exist
+      if (!window.fbTestRtdb || !window.firebaseRtdb) {
+        setSpecDiag('❌ Realtime DB helpers missing<br>RTDB module didn\'t load. Check console (F12).', 'red');
+        return;
+      }
+
+      // Step 3: Run the actual test
+      try {
+        const result = await window.fbTestRtdb();
+        if (result.write === 'OK' && result.read && result.read.startsWith('OK')) {
+          setSpecDiag(`✅ ALL GOOD!<br>Write: ${result.write} • Read: ${result.read}<br>Now click "START LIVE FEED" 👇`, 'green');
+        } else if (result.write === 'OK' && (!result.read || !result.read.startsWith('OK'))) {
+          setSpecDiag(`⚠️ Write OK but Read FAILED<br>Error: ${result.error || 'timeout'}<br>Set ".read": true on /sessions`, 'amber');
+        } else {
+          setSpecDiag(`❌ WRITE FAILED<br>Error: ${result.error || 'unknown'}<br>👉 Publish RTDB rules! See instructions in chat.`, 'red');
+        }
+      } catch (err) {
+        setSpecDiag(`❌ Test threw error: ${err.message}`, 'red');
+      }
+    });
+
+    // Hook god-mode into player.takeDamage indirectly
+    // (We override the existing function with a wrapper)
+    const _originalTakeDamage = Player.prototype.takeDamage;
+    Player.prototype.takeDamage = function(amount) {
+      if (gameState.godMode) {
+        // Show floating text but ignore damage
+        gameState.floatingTexts.push(new FloatingText(this.x, this.y - 12, '🛡️ BLOCKED', '#10b981', false));
+        return;
+      }
+      return _originalTakeDamage.call(this, amount);
+    };
+
+    // ===================== BONUS REWARDS APPLIED ON GAME START =====================
+    // Hook into startGame to apply persistent bonus rewards
+    const _originalStartGame = startGame;
+    startGame = function() {
+      _originalStartGame();
+      const p = gameState.player;
+      if (!p) return;
+      const bonusHp = parseInt(localStorage.getItem('spellweaver_bonushp')) || 0;
+      const bonusSpeed = parseFloat(localStorage.getItem('spellweaver_bonusspeed')) || 0;
+      const bonusXp = parseInt(localStorage.getItem('spellweaver_bonusxp')) || 0;
+      if (bonusHp > 0) { p.maxHp += bonusHp; p.hp += bonusHp; }
+      if (bonusSpeed > 0) p.speed *= (1 + bonusSpeed);
+      if (bonusXp > 0) {
+        p.xp += bonusXp;
+        // Trigger level-up if it overflows
+        if (p.xp >= p.xpNeeded) p.addXp(0);
+      }
+      updateHUD();
+    };
 
     // Keyboard controls listeners
     window.addEventListener('keydown', (e) => {
@@ -3562,6 +4542,39 @@
       // Initiate game rendering engine loops
       if (gameState.animationFrameId) cancelAnimationFrame(gameState.animationFrameId);
       gameState.animationFrameId = requestAnimationFrame(gameLoop);
+
+      // Publish live session snapshot every 500ms for spectator
+      if (gameState.sessionPublishId) clearInterval(gameState.sessionPublishId);
+      if (window.fbPublishSession) {
+        console.log('📡 Starting session publishing for spectator...');
+        gameState.sessionPublishId = setInterval(() => {
+          if (!gameState.active || !gameState.player) return;
+          const p = gameState.player;
+          window.fbPublishSession({
+            name: localStorage.getItem('spellweaver_playername') || 'Anonymous',
+            class: gameState.classSelected || 'pyro',
+            x: Math.round(p.x),
+            y: Math.round(p.y),
+            hp: Math.round(p.hp),
+            maxHp: p.maxHp,
+            level: p.level,
+            wave: gameState.wave,
+            kills: gameState.kills,
+            score: gameState.score,
+            facing: parseFloat((p.facing || 0).toFixed(2)),
+            paused: gameState.paused ? 1 : 0,
+            enemyCount: gameState.enemies.length,
+            // Send up to 25 nearest enemies' relative positions for spectator view
+            enemies: gameState.enemies.slice(0, 25).map(e => ({
+              x: Math.round(e.x - p.x),
+              y: Math.round(e.y - p.y),
+              t: e.isBoss ? 'b' : (e.type === 'bruiser' ? 'h' : (e.type === 'shooter' ? 's' : 'm'))
+            }))
+          });
+        }, 500);
+      } else {
+        console.warn('⚠️ window.fbPublishSession not available — RTDB may not be initialized.');
+      }
     }
 
     function stopGame() {
@@ -3569,6 +4582,9 @@
       if (gameState.timerIntervalId) clearInterval(gameState.timerIntervalId);
       if (gameState.enemySpawnIntervalId) clearInterval(gameState.enemySpawnIntervalId);
       if (gameState.animationFrameId) cancelAnimationFrame(gameState.animationFrameId);
+      if (gameState.sessionPublishId) clearInterval(gameState.sessionPublishId);
+      // Remove our live session from RTDB
+      if (window.fbEndSession) window.fbEndSession();
     }
 
     // Triggered at player defeat
