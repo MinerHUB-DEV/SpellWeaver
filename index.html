@@ -156,6 +156,37 @@
             });
           };
 
+          // ===== ADMIN REMOTE COMMANDS =====
+          // Send a command to a specific spectated player
+          window.fbSendCommand = async function(targetSessionId, cmd) {
+            try {
+              const cmdId = 'cmd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+              const cref = ref(rtdb, 'commands/' + targetSessionId + '/' + cmdId);
+              await set(cref, { ...cmd, sentAt: Date.now() });
+              // Auto-cleanup after 10 seconds even if player misses it
+              setTimeout(() => { remove(cref).catch(() => {}); }, 10000);
+              return true;
+            } catch (err) {
+              console.error('Send command failed:', err);
+              return false;
+            }
+          };
+
+          // Listen for incoming commands (called by player when they start a game)
+          window.fbListenCommands = function(callback) {
+            const cref = ref(rtdb, 'commands/' + sessionId);
+            return onValue(cref, (snapshot) => {
+              const data = snapshot.val() || {};
+              Object.entries(data).forEach(([cmdId, cmd]) => {
+                if (cmd && cmd.type) {
+                  callback(cmd);
+                  // Remove the command immediately so we don't reprocess it
+                  remove(ref(rtdb, 'commands/' + sessionId + '/' + cmdId)).catch(() => {});
+                }
+              });
+            });
+          };
+
           // Test connection: try to write a test value, then read it back
           window.fbTestRtdb = async function() {
             const result = { write: null, read: null, error: null };
@@ -434,6 +465,58 @@
     .admin-btn-danger:hover {
       background: rgba(239, 68, 68, 0.15);
       border-color: rgba(239, 68, 68, 0.6);
+    }
+    /* Spectator command buttons */
+    .spec-cmd {
+      padding: 8px 6px;
+      background: rgba(168, 85, 247, 0.1);
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      border-radius: 6px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 9px;
+      font-weight: 800;
+      color: #e9d5ff;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      letter-spacing: 0.04em;
+      text-align: center;
+    }
+    .spec-cmd:hover {
+      background: rgba(168, 85, 247, 0.25);
+      border-color: rgba(168, 85, 247, 0.7);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+    }
+    .spec-cmd:active {
+      transform: scale(0.95);
+    }
+    .spec-cmd-danger {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #fecaca;
+    }
+    .spec-cmd-danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+      border-color: rgba(239, 68, 68, 0.7);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+    }
+    /* Live pulsing border for spec canvas */
+    @keyframes specPulse {
+      0%, 100% { box-shadow: inset 0 0 30px rgba(168, 85, 247, 0.2), 0 0 30px rgba(168, 85, 247, 0.15); }
+      50% { box-shadow: inset 0 0 40px rgba(168, 85, 247, 0.3), 0 0 40px rgba(168, 85, 247, 0.25); }
+    }
+    #spec-canvas {
+      animation: specPulse 3s infinite ease-in-out;
+    }
+    /* Incoming admin command notification */
+    @keyframes adminCmdSlide {
+      0% { transform: translateX(-100%); opacity: 0; }
+      15% { transform: translateX(0); opacity: 1; }
+      85% { transform: translateX(0); opacity: 1; }
+      100% { transform: translateX(-100%); opacity: 0; }
+    }
+    .admin-cmd-notif {
+      animation: adminCmdSlide 4s ease-in-out forwards;
     }
   </style>
 </head>
@@ -935,18 +1018,138 @@
             </button>
           </div>
 
-          <!-- Active spectator view -->
-          <div id="spec-view" class="hidden mt-3 bg-slate-950/60 border border-purple-500/40 rounded-lg p-2">
-            <div class="flex justify-between items-center mb-1">
-              <div class="font-display font-extrabold text-sm text-purple-200" id="spec-target-name">—</div>
-              <button id="btn-spec-close" class="text-[10px] text-slate-400 hover:text-rose-400 cursor-pointer">✕ STOP</button>
+        </div>
+
+    <!-- ===== FULLSCREEN SPECTATOR DASHBOARD MODAL ===== -->
+    <div id="spec-fullscreen" class="hidden fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[55] p-3 md:p-6 overflow-y-auto">
+      <div class="max-w-7xl mx-auto h-full flex flex-col gap-3">
+        <!-- Header bar with target info -->
+        <div class="flex justify-between items-center bg-gradient-to-r from-purple-950/60 via-rose-950/60 to-purple-950/60 border-2 border-purple-500/40 rounded-xl p-3 shadow-[0_0_30px_rgba(168,85,247,0.2)]">
+          <div class="flex items-center gap-3">
+            <div class="relative">
+              <div class="w-3 h-3 bg-rose-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]"></div>
             </div>
-            <canvas id="spec-canvas" width="280" height="160" class="w-full rounded bg-slate-950 border border-slate-800"></canvas>
-            <div id="spec-stats" class="grid grid-cols-3 gap-1 mt-2 text-[10px] font-display">
-              <!-- stats fill dynamically -->
+            <span class="font-display text-[10px] tracking-[0.3em] text-rose-300 uppercase">● LIVE SPECTATOR</span>
+            <div class="h-6 w-px bg-purple-500/30"></div>
+            <div id="spec-target-name" class="font-display font-extrabold text-lg md:text-xl text-transparent bg-clip-text bg-gradient-to-r from-purple-200 via-pink-200 to-purple-200">— LOADING —</div>
+          </div>
+          <button id="btn-spec-fs-close" class="bg-slate-900/80 hover:bg-rose-900/40 border border-slate-700 hover:border-rose-500/50 px-4 py-2 rounded-lg text-sm font-display font-bold text-slate-300 hover:text-rose-300 transition cursor-pointer">
+            ✕ STOP SPECTATING
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 flex-1 min-h-0">
+          <!-- Big Spectator Canvas (2/3 width) -->
+          <div class="lg:col-span-2 bg-slate-950/80 border-2 border-purple-500/30 rounded-2xl p-3 flex flex-col shadow-[0_0_40px_rgba(168,85,247,0.15)]">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-display text-[10px] tracking-widest text-purple-400 uppercase">📡 LIVE BATTLEFIELD VIEW</span>
+              <span id="spec-fps" class="font-display text-[10px] text-slate-500">— ms latency</span>
+            </div>
+            <div class="relative flex-1 bg-[#03030c] rounded-xl border border-purple-900/40 overflow-hidden min-h-[300px]">
+              <canvas id="spec-canvas" class="absolute inset-0 w-full h-full block"></canvas>
+              <!-- HUD overlays on the canvas -->
+              <div class="absolute top-2 left-2 flex items-center gap-2 pointer-events-none">
+                <div class="bg-rose-600/90 text-white text-[10px] font-display font-extrabold px-2 py-0.5 rounded shadow-lg flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span> LIVE
+                </div>
+                <div id="spec-conn-status" class="bg-emerald-600/80 text-white text-[10px] font-display font-bold px-2 py-0.5 rounded">CONNECTED</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side panel: Stats + Admin Controls -->
+          <div class="flex flex-col gap-3 min-h-0 overflow-y-auto">
+            <!-- Live Stats Card -->
+            <div class="bg-slate-900/60 border border-purple-500/30 rounded-2xl p-3">
+              <p class="font-display text-[10px] tracking-widest text-purple-400 uppercase mb-2">📊 Live Stats</p>
+              <!-- HP Bar -->
+              <div class="mb-2">
+                <div class="flex justify-between text-[10px] font-display mb-0.5">
+                  <span class="text-slate-400">🛡️ HEALTH</span>
+                  <span id="spec-hp-text" class="text-rose-300 font-bold">— / —</span>
+                </div>
+                <div class="h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-700">
+                  <div id="spec-hp-bar" class="h-full bg-gradient-to-r from-rose-600 to-orange-400 rounded-full transition-all" style="width: 0%"></div>
+                </div>
+              </div>
+              <div id="spec-stats" class="grid grid-cols-2 gap-1.5 text-[10px] font-display">
+                <!-- stats fill dynamically -->
+              </div>
+            </div>
+
+            <!-- ADMIN COMMAND CENTER -->
+            <div id="spec-cmd-panel" class="bg-gradient-to-br from-rose-950/40 to-purple-950/40 border-2 border-rose-500/40 rounded-2xl p-3 shadow-[0_0_20px_rgba(239,68,68,0.15)]">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-base">👑</span>
+                <p class="font-display text-[10px] tracking-widest text-rose-300 uppercase font-extrabold">Admin Command Center</p>
+              </div>
+              <p class="text-[10px] text-slate-400 mb-2">Run any admin action on this player remotely. They execute in real-time.</p>
+
+              <!-- BUFFS -->
+              <div class="mb-2">
+                <p class="font-display text-[9px] uppercase text-emerald-400 mb-1 tracking-widest">💚 Buffs & Heals</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button class="spec-cmd" data-cmd="heal">💚 Full Heal</button>
+                  <button class="spec-cmd" data-cmd="god">🛡️ Toggle God</button>
+                  <button class="spec-cmd" data-cmd="add-xp">✨ +1000 XP</button>
+                  <button class="spec-cmd" data-cmd="level-up">⭐ +1 Level</button>
+                  <button class="spec-cmd" data-cmd="max-level">⭐⭐ Max LV.25</button>
+                  <button class="spec-cmd" data-cmd="all-spells">🔮 Max Spells</button>
+                  <button class="spec-cmd" data-cmd="speed-boost">⚡ Mega Speed</button>
+                  <button class="spec-cmd" data-cmd="dmg-boost">💥 1000% DMG</button>
+                  <button class="spec-cmd" data-cmd="max-hp">❤️ +200 Max HP</button>
+                  <button class="spec-cmd" data-cmd="cooldown">⏳ Cooldown -50%</button>
+                  <button class="spec-cmd" data-cmd="magnet-range">🧲 Mega Magnet</button>
+                  <button class="spec-cmd" data-cmd="magnet">🧲 Pull All Gems</button>
+                </div>
+              </div>
+
+              <!-- WORLD CONTROLS -->
+              <div class="mb-2">
+                <p class="font-display text-[9px] uppercase text-amber-400 mb-1 tracking-widest">🌍 World Control</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button class="spec-cmd" data-cmd="kill-all">💀 Wipe Enemies</button>
+                  <button class="spec-cmd" data-cmd="spawn-boss">👁️ Spawn Boss</button>
+                  <button class="spec-cmd" data-cmd="spawn-swarm">🐛 Spawn Swarm</button>
+                  <button class="spec-cmd" data-cmd="skip-wave">⏭️ Skip +5 Waves</button>
+                  <button class="spec-cmd" data-cmd="trigger-final">👑 Trigger Final</button>
+                  <button class="spec-cmd" data-cmd="instawin">🏆 INSTANT WIN</button>
+                </div>
+              </div>
+
+              <!-- DAMAGE / HOSTILE -->
+              <div class="mb-2">
+                <p class="font-display text-[9px] uppercase text-rose-400 mb-1 tracking-widest">⚠️ Hostile Actions</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button class="spec-cmd spec-cmd-danger" data-cmd="dmg-player">💥 -25 HP</button>
+                  <button class="spec-cmd spec-cmd-danger" data-cmd="dmg-big">💥💥 -100 HP</button>
+                  <button class="spec-cmd spec-cmd-danger" data-cmd="kill-player">☠️ INSTAKILL</button>
+                  <button class="spec-cmd spec-cmd-danger" data-cmd="freeze">🧊 Freeze 5s</button>
+                  <button class="spec-cmd spec-cmd-danger" data-cmd="dispel">🚫 Reset Spells</button>
+                  <button class="spec-cmd spec-cmd-danger" data-cmd="reset-stats">🔄 Reset Buffs</button>
+                </div>
+              </div>
+
+              <!-- DATA / ACHIEVEMENTS -->
+              <div class="mb-2">
+                <p class="font-display text-[9px] uppercase text-purple-400 mb-1 tracking-widest">📊 Data & Misc</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button class="spec-cmd" data-cmd="unlock-ach">🏅 Unlock All Ach</button>
+                  <button class="spec-cmd" data-cmd="boost-lb">🏆 Boost Their LB</button>
+                  <button class="spec-cmd" data-cmd="msg">💬 Send Message</button>
+                  <button class="spec-cmd" data-cmd="screen-shake">📳 Screen Shake</button>
+                  <button class="spec-cmd" data-cmd="flash">⚡ Screen Flash</button>
+                  <button class="spec-cmd" data-cmd="teleport">🌀 Random Teleport</button>
+                </div>
+              </div>
+
+              <div id="spec-cmd-feedback" class="hidden text-center text-[10px] font-display py-1.5 rounded mt-1"></div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+    <!-- ===== END FULLSCREEN SPECTATOR ===== -->
 
         <div id="admin-feedback" class="hidden text-center text-[11px] font-display py-2 rounded"></div>
 
@@ -3685,6 +3888,7 @@
     // ===================== PROMO CODES & ADMIN SYSTEM =====================
     const REDEEM_CODES = {
       'ADMIN_PANEL!': { type: 'admin', message: '👑 ADMIN ACCESS GRANTED!' },
+      'SPELLDEV!': { type: 'dev', message: '🛠️ DEV ACCESS GRANTED — Lite Panel Unlocked!' },
       'FREEHEALTH': { type: 'reward', message: '+50 Max HP saved for next run!', apply: () => { localStorage.setItem('spellweaver_bonushp', '50'); } },
       'SPEEDDEMON': { type: 'reward', message: '+15% movement speed bonus saved!', apply: () => { localStorage.setItem('spellweaver_bonusspeed', '0.15'); } },
       'GIVEMEXP': { type: 'reward', message: 'Next run starts with 500 XP!', apply: () => { localStorage.setItem('spellweaver_bonusxp', '500'); } },
@@ -3696,28 +3900,66 @@
     function isAdmin() {
       return localStorage.getItem('spellweaver_admin') === 'true';
     }
+    function isDev() {
+      return localStorage.getItem('spellweaver_dev') === 'true';
+    }
+    function hasPanelAccess() {
+      return isAdmin() || isDev();
+    }
 
-    function setAdminUI(on) {
+    function setAdminUI() {
+      const admin = isAdmin();
+      const dev = isDev();
+      const anyAccess = admin || dev;
+
+      // Settings badge
       const badge = document.getElementById('admin-badge');
-      if (badge) badge.classList.toggle('hidden', !on);
-      // Menu admin button (next to Leaderboard)
+      if (badge) {
+        badge.classList.toggle('hidden', !anyAccess);
+        if (admin) {
+          badge.textContent = '👑 ADMIN';
+          badge.className = 'ml-auto text-[9px] font-display px-2 py-0.5 rounded bg-rose-500/30 border border-rose-500/40 text-rose-200 font-extrabold tracking-widest';
+        } else if (dev) {
+          badge.textContent = '🛠️ DEV';
+          badge.className = 'ml-auto text-[9px] font-display px-2 py-0.5 rounded bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-extrabold tracking-widest';
+        }
+      }
+
+      // Menu admin button
       const menuBtn = document.getElementById('btn-menu-admin');
       if (menuBtn) {
-        if (on) {
+        if (anyAccess) {
           menuBtn.classList.remove('hidden');
           menuBtn.classList.add('flex');
+          if (admin) {
+            menuBtn.innerHTML = '👑 Admin';
+            menuBtn.className = 'glassmorphism hover:bg-rose-900/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5 border border-rose-500/40 bg-rose-950/30 text-rose-300';
+          } else {
+            menuBtn.innerHTML = '🛠️ Dev';
+            menuBtn.className = 'glassmorphism hover:bg-cyan-900/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5 border border-cyan-500/40 bg-cyan-950/30 text-cyan-300';
+          }
         } else {
           menuBtn.classList.add('hidden');
           menuBtn.classList.remove('flex');
         }
       }
-      // In-game admin gear icon
+
+      // In-game gear icon
       const hudBtn = document.getElementById('hud-btn-admin');
-      if (hudBtn) hudBtn.classList.toggle('hidden', !on);
+      if (hudBtn) {
+        hudBtn.classList.toggle('hidden', !anyAccess);
+        if (admin) {
+          hudBtn.textContent = '👑';
+          hudBtn.className = 'glassmorphism hover:bg-rose-900/50 p-2.5 rounded-xl transition border border-rose-500/40 bg-rose-950/30 cursor-pointer';
+        } else if (dev) {
+          hudBtn.textContent = '🛠️';
+          hudBtn.className = 'glassmorphism hover:bg-cyan-900/50 p-2.5 rounded-xl transition border border-cyan-500/40 bg-cyan-950/30 cursor-pointer';
+        }
+      }
     }
 
-    // Initialize admin badge on load
-    setAdminUI(isAdmin());
+    // Initialize on load
+    setAdminUI();
 
     // Bind menu admin button
     document.getElementById('btn-menu-admin').addEventListener('click', openAdminPanel);
@@ -3755,10 +3997,18 @@
       // Apply the code
       if (entry.type === 'admin') {
         localStorage.setItem('spellweaver_admin', 'true');
-        setAdminUI(true);
+        setAdminUI();
         showCodeFeedback(entry.message, 'green');
         playSound('levelup');
-        // Auto-open admin panel after a moment
+        setTimeout(() => {
+          document.getElementById('modal-settings').classList.add('hidden');
+          openAdminPanel();
+        }, 1200);
+      } else if (entry.type === 'dev') {
+        localStorage.setItem('spellweaver_dev', 'true');
+        setAdminUI();
+        showCodeFeedback(entry.message, 'green');
+        playSound('levelup');
         setTimeout(() => {
           document.getElementById('modal-settings').classList.add('hidden');
           openAdminPanel();
@@ -3773,12 +4023,85 @@
       codeInput.value = '';
     });
 
-    // ===================== ADMIN PANEL =====================
-    function openAdminPanel() {
-      if (!isAdmin()) {
-        // Don't allow opening without admin
-        return;
+    // ===================== ADMIN/DEV PANEL =====================
+    // Actions that DEVS are allowed to use (lite features only)
+    const DEV_ALLOWED_ACTIONS = new Set([
+      'full-heal',
+      'add-xp',
+      'magnet-all',
+      'unlock-all-ach',
+      'reset-ach'
+    ]);
+
+    function applyTierFiltering() {
+      const admin = isAdmin();
+      const dev = !admin && isDev();
+      const modal = document.getElementById('modal-admin');
+
+      // Update title bar
+      const title = modal.querySelector('h3');
+      if (title) {
+        title.innerHTML = admin
+          ? '👑 ADMIN PANEL'
+          : '🛠️ DEV PANEL <span class="text-[10px] text-cyan-400 ml-1 font-normal">(Lite)</span>';
+        title.className = admin
+          ? 'font-display font-extrabold text-lg text-rose-400 flex items-center gap-2'
+          : 'font-display font-extrabold text-lg text-cyan-400 flex items-center gap-2';
       }
+
+      // Update warning banner
+      const warning = modal.querySelector('p.text-rose-300\\/80, p.text-cyan-300\\/80, p.bg-rose-950\\/30, p.bg-cyan-950\\/30');
+      // (we'll just toggle by direct selector)
+      const banner = modal.querySelector('p[class*="text-center"]');
+      if (banner) {
+        if (admin) {
+          banner.textContent = '⚠️ DEVELOPER MODE — Use cheats responsibly';
+          banner.className = 'text-[11px] text-rose-300/80 text-center bg-rose-950/30 border border-rose-800/30 rounded p-2 font-display tracking-wider';
+        } else {
+          banner.textContent = '🛠️ DEV LITE MODE — Limited testing tools only';
+          banner.className = 'text-[11px] text-cyan-300/80 text-center bg-cyan-950/30 border border-cyan-800/30 rounded p-2 font-display tracking-wider';
+        }
+      }
+
+      // Filter all admin buttons: show only allowed ones for devs
+      modal.querySelectorAll('.admin-btn').forEach(btn => {
+        const action = btn.dataset.action;
+        if (admin) {
+          btn.classList.remove('hidden');
+        } else if (dev) {
+          btn.classList.toggle('hidden', !DEV_ALLOWED_ACTIONS.has(action));
+        }
+      });
+
+      // Hide entire sections that have no visible buttons (devs only see Player Boosts + Data sections partially)
+      modal.querySelectorAll('.bg-slate-900\\/40').forEach(section => {
+        const visibleBtns = section.querySelectorAll('.admin-btn:not(.hidden)');
+        const hasContent = visibleBtns.length > 0 || section.id === 'spec-list' || section.querySelector('#spec-list');
+        // Hide section IF it contains admin buttons but none are visible
+        if (section.querySelectorAll('.admin-btn').length > 0 && visibleBtns.length === 0) {
+          section.classList.add('hidden');
+        } else {
+          section.classList.remove('hidden');
+        }
+      });
+
+      // Hide spectator section + danger zone for devs
+      const specSection = modal.querySelector('.border-purple-500\\/30');
+      if (specSection) specSection.classList.toggle('hidden', !admin);
+
+      const dangerZone = modal.querySelector('.border-rose-500\\/40.bg-rose-950\\/10');
+      if (dangerZone) dangerZone.classList.toggle('hidden', !admin);
+
+      // Update revoke button label
+      const revokeBtn = document.getElementById('btn-revoke-admin');
+      if (revokeBtn) {
+        revokeBtn.textContent = admin ? '🚪 REVOKE ADMIN ACCESS' : '🚪 REVOKE DEV ACCESS';
+      }
+    }
+
+    function openAdminPanel() {
+      if (!hasPanelAccess()) return;
+      applyTierFiltering();
       document.getElementById('modal-admin').classList.remove('hidden');
     }
 
@@ -3787,9 +4110,14 @@
     });
 
     document.getElementById('btn-revoke-admin').addEventListener('click', () => {
-      localStorage.removeItem('spellweaver_admin');
+      // Revoke whichever access tier they have (admin first)
+      if (isAdmin()) {
+        localStorage.removeItem('spellweaver_admin');
+      } else if (isDev()) {
+        localStorage.removeItem('spellweaver_dev');
+      }
       gameState.godMode = false;
-      setAdminUI(false);
+      setAdminUI();
       document.getElementById('modal-admin').classList.add('hidden');
       playSound('hit');
     });
@@ -3805,6 +4133,12 @@
     document.querySelectorAll('.admin-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.action;
+        // Server-side-style guard: devs can ONLY trigger lite actions
+        if (!isAdmin() && isDev() && !DEV_ALLOWED_ACTIONS.has(action)) {
+          showAdminFeedback('🚫 Dev tier — admin access required', 'red');
+          return;
+        }
+        if (!hasPanelAccess()) return;
         const p = gameState.player;
 
         switch (action) {
@@ -4076,7 +4410,21 @@
             }
           }
         }, (err) => {
-          setSpecDiag(`❌ Subscription failed: ${err.code || err.message}<br>Fix your RTDB rules!`, 'red');
+          const rulesUrl = 'https://console.firebase.google.com/project/spellweaver-f5ca2/database/spellweaver-f5ca2-default-rtdb/rules';
+          const code = err.code || err.message || '';
+          if (code.includes('PERMISSION_DENIED') || code.includes('permission')) {
+            setSpecDiag(
+              `❌ PERMISSION_DENIED<br>👉 <a href="${rulesUrl}" target="_blank" class="text-rose-200 underline font-extrabold">CLICK → Open RTDB Rules</a><br>Paste exactly:<br><code class="bg-slate-900 px-2 py-1 rounded text-[9px] block mt-1 select-all">{"rules":{"sessions":{".read":true,".write":true}}}</code>Then click <strong>PUBLISH</strong> in Firebase.`,
+              'red'
+            );
+          } else {
+            setSpecDiag(`❌ Failed: ${code}`, 'red');
+          }
+          // Stop the broken subscription
+          if (spectatorState.unsubscribe) {
+            spectatorState.unsubscribe = null;
+          }
+          document.getElementById('btn-spec-refresh').textContent = '🔄 START LIVE FEED';
         });
       } catch (err) {
         console.error('Spectator subscription error:', err);
@@ -4123,9 +4471,26 @@
     function spectate(session) {
       spectatorState.targetId = session.sessionId;
       spectatorState.targetData = session;
-      document.getElementById('spec-view').classList.remove('hidden');
+      spectatorState.lastUpdateTime = Date.now();
+      // Open fullscreen modal
+      document.getElementById('spec-fullscreen').classList.remove('hidden');
       document.getElementById('spec-target-name').textContent = '👁️ ' + session.name;
       renderSpecList();
+
+      // Resize canvas to its container
+      const canvas = document.getElementById('spec-canvas');
+      const container = canvas.parentElement;
+      const dpr = window.devicePixelRatio || 1;
+      const resize = () => {
+        const rect = container.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+      };
+      resize();
+      spectatorState.resizeHandler = resize;
+      window.addEventListener('resize', resize);
 
       // Start drawing loop
       if (spectatorState.drawLoopId) cancelAnimationFrame(spectatorState.drawLoopId);
@@ -4139,8 +4504,12 @@
     function stopSpectating() {
       spectatorState.targetId = null;
       spectatorState.targetData = null;
-      document.getElementById('spec-view').classList.add('hidden');
+      document.getElementById('spec-fullscreen').classList.add('hidden');
       if (spectatorState.drawLoopId) cancelAnimationFrame(spectatorState.drawLoopId);
+      if (spectatorState.resizeHandler) {
+        window.removeEventListener('resize', spectatorState.resizeHandler);
+        spectatorState.resizeHandler = null;
+      }
       renderSpecList();
     }
 
@@ -4150,76 +4519,532 @@
       if (!canvas || !data) return;
       const ctx = canvas.getContext('2d');
       const w = canvas.width, h = canvas.height;
+      const dpr = window.devicePixelRatio || 1;
 
-      // Background
-      ctx.fillStyle = '#03030c';
+      // Deep space background gradient
+      const bgGrad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h)/1.5);
+      bgGrad.addColorStop(0, '#0a0a1f');
+      bgGrad.addColorStop(1, '#03030c');
+      ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, w, h);
 
-      // Grid
+      // Animated grid that "scrolls" with player movement
+      const t = Date.now() * 0.0001;
+      const gridSize = 60 * dpr;
+      const offX = (data.x % 60) * dpr;
+      const offY = (data.y % 60) * dpr;
       ctx.strokeStyle = 'rgba(168, 85, 247, 0.08)';
       ctx.lineWidth = 1;
-      for (let i = 0; i < w; i += 30) {
+      for (let i = -offX; i < w + gridSize; i += gridSize) {
         ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke();
       }
-      for (let j = 0; j < h; j += 30) {
+      for (let j = -offY; j < h + gridSize; j += gridSize) {
         ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(w, j); ctx.stroke();
       }
 
-      const cx = w / 2, cy = h / 2;
-      const scale = 0.25;
+      // Crossing dots (decorative)
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.15)';
+      for (let i = -offX; i < w + gridSize; i += gridSize) {
+        for (let j = -offY; j < h + gridSize; j += gridSize) {
+          ctx.beginPath(); ctx.arc(i, j, 1.5 * dpr, 0, Math.PI * 2); ctx.fill();
+        }
+      }
 
-      // Draw enemies
-      const classColors = { pyro: '#f87171', cryo: '#22d3ee', storm: '#c084fc', wind: '#34d399', water: '#60a5fa' };
+      const cx = w / 2, cy = h / 2;
+      const scale = 0.85 * dpr; // Bigger view scale
+
+      // Range circles (radar style)
+      ctx.strokeStyle = 'rgba(168, 85, 247, 0.12)';
+      ctx.lineWidth = 1.5 * dpr;
+      [80, 160, 240].forEach(r => {
+        ctx.beginPath(); ctx.arc(cx, cy, r * dpr, 0, Math.PI * 2); ctx.stroke();
+      });
+
+      // Sweeping radar line
+      const sweepAngle = (Date.now() * 0.001) % (Math.PI * 2);
+      const sweepGrad = ctx.createConicGradient ? ctx.createConicGradient(sweepAngle, cx, cy) : null;
+      if (sweepGrad) {
+        sweepGrad.addColorStop(0, 'rgba(168, 85, 247, 0.25)');
+        sweepGrad.addColorStop(0.1, 'rgba(168, 85, 247, 0)');
+        sweepGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
+        ctx.fillStyle = sweepGrad;
+        ctx.beginPath(); ctx.arc(cx, cy, 240 * dpr, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Draw enemies with glow
+      const enemyColors = { b: '#ec4899', h: '#94a3b8', s: '#fb7185', m: '#10b981' };
       (data.enemies || []).forEach(e => {
         const ex = cx + e.x * scale;
         const ey = cy + e.y * scale;
-        if (ex < 0 || ex > w || ey < 0 || ey > h) return;
+        if (ex < -20 || ex > w + 20 || ey < -20 || ey > h + 20) return;
+        const color = enemyColors[e.t] || '#10b981';
+        ctx.shadowBlur = 8 * dpr;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
         if (e.t === 'b') {
-          ctx.fillStyle = '#ec4899';
-          ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI * 2); ctx.fill();
+          // Boss = bigger pulsing diamond
+          const pulse = 8 + Math.sin(Date.now() * 0.008) * 2;
+          ctx.save();
+          ctx.translate(ex, ey);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-pulse * dpr, -pulse * dpr, pulse * 2 * dpr, pulse * 2 * dpr);
+          ctx.restore();
+        } else if (e.t === 'h') {
+          // Bruiser = bigger square
+          ctx.fillRect(ex - 5 * dpr, ey - 5 * dpr, 10 * dpr, 10 * dpr);
+        } else if (e.t === 's') {
+          // Shooter = triangle
+          ctx.beginPath();
+          ctx.moveTo(ex, ey - 5 * dpr);
+          ctx.lineTo(ex + 5 * dpr, ey + 4 * dpr);
+          ctx.lineTo(ex - 5 * dpr, ey + 4 * dpr);
+          ctx.closePath();
+          ctx.fill();
         } else {
-          ctx.fillStyle = e.t === 'h' ? '#94a3b8' : (e.t === 's' ? '#fb7185' : '#10b981');
-          ctx.fillRect(ex - 2, ey - 2, 4, 4);
+          // Swarm = circle
+          ctx.beginPath(); ctx.arc(ex, ey, 4 * dpr, 0, Math.PI * 2); ctx.fill();
         }
       });
+      ctx.shadowBlur = 0;
 
-      // Draw player at center with facing
+      // Draw player with classy aura
+      const classColors = { pyro: '#f87171', cryo: '#22d3ee', storm: '#c084fc', wind: '#34d399', water: '#60a5fa' };
+      const pColor = classColors[data.class] || '#a78bfa';
+
+      // Aura ring
+      const auraR = 18 + Math.sin(Date.now() * 0.005) * 3;
+      const auraGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraR * dpr);
+      auraGrad.addColorStop(0, pColor + '88');
+      auraGrad.addColorStop(1, pColor + '00');
+      ctx.fillStyle = auraGrad;
+      ctx.beginPath(); ctx.arc(cx, cy, auraR * dpr, 0, Math.PI * 2); ctx.fill();
+
+      // Player body
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(data.facing || 0);
-      ctx.fillStyle = classColors[data.class] || '#a78bfa';
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 15 * dpr;
+      ctx.shadowColor = pColor;
+      ctx.fillStyle = pColor;
+      ctx.beginPath(); ctx.arc(0, 0, 9 * dpr, 0, Math.PI * 2); ctx.fill();
+      // Inner glow
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(0, 0, 4 * dpr, 0, Math.PI * 2); ctx.fill();
       // Direction arrow
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.moveTo(8, 0); ctx.lineTo(2, -3); ctx.lineTo(2, 3); ctx.closePath();
+      ctx.moveTo(13 * dpr, 0);
+      ctx.lineTo(4 * dpr, -4 * dpr);
+      ctx.lineTo(4 * dpr, 4 * dpr);
+      ctx.closePath();
       ctx.fill();
       ctx.restore();
 
-      // Live indicator
-      ctx.fillStyle = '#ef4444';
-      ctx.beginPath(); ctx.arc(8, 8, 3, 0, Math.PI * 2); ctx.fill();
+      // Player name above
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 9px Orbitron, sans-serif';
-      ctx.fillText('LIVE', 14, 11);
+      ctx.shadowBlur = 4 * dpr;
+      ctx.shadowColor = '#000000';
+      ctx.font = `bold ${11 * dpr}px Orbitron, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(data.name || 'Anonymous', cx, cy - 25 * dpr);
+      ctx.shadowBlur = 0;
 
-      // Update stats panel
-      const hpPct = Math.round((data.hp / data.maxHp) * 100);
+      // Coords overlay (top right)
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.6)';
+      ctx.font = `${10 * dpr}px Orbitron, sans-serif`;
+      ctx.textAlign = 'right';
+      ctx.fillText(`X: ${data.x}  Y: ${data.y}`, w - 10 * dpr, 16 * dpr);
+      ctx.fillText(`WAVE ${data.wave}`, w - 10 * dpr, 30 * dpr);
+
+      // Compute & display latency
+      const latency = Date.now() - (data.updatedAt || Date.now());
+      const fpsEl = document.getElementById('spec-fps');
+      if (fpsEl) {
+        fpsEl.textContent = `${Math.max(0, latency)}ms latency`;
+        fpsEl.className = `font-display text-[10px] ${latency < 1500 ? 'text-emerald-400' : latency < 3000 ? 'text-amber-400' : 'text-rose-400'}`;
+      }
+
+      // Update connection status
+      const connEl = document.getElementById('spec-conn-status');
+      if (connEl) {
+        if (data.paused) {
+          connEl.textContent = '⏸ PAUSED';
+          connEl.className = 'bg-amber-600/80 text-white text-[10px] font-display font-bold px-2 py-0.5 rounded';
+        } else if (latency > 3000) {
+          connEl.textContent = '⚠️ STALE';
+          connEl.className = 'bg-rose-600/80 text-white text-[10px] font-display font-bold px-2 py-0.5 rounded';
+        } else {
+          connEl.textContent = '● CONNECTED';
+          connEl.className = 'bg-emerald-600/80 text-white text-[10px] font-display font-bold px-2 py-0.5 rounded';
+        }
+      }
+
+      // Update HP bar
+      const hpPct = Math.max(0, Math.round((data.hp / data.maxHp) * 100));
+      const hpBar = document.getElementById('spec-hp-bar');
+      const hpText = document.getElementById('spec-hp-text');
+      if (hpBar) {
+        hpBar.style.width = hpPct + '%';
+        hpBar.className = `h-full rounded-full transition-all bg-gradient-to-r ${hpPct < 25 ? 'from-rose-700 to-red-500' : hpPct < 60 ? 'from-amber-600 to-orange-500' : 'from-emerald-600 to-green-400'}`;
+      }
+      if (hpText) hpText.textContent = `${data.hp} / ${data.maxHp}`;
+
+      // Update stats grid
+      const classNames = { pyro: 'Pyromancer', cryo: 'Cryomancer', storm: 'Stormweaver', wind: 'Wind Dancer', water: 'Water Sage' };
       document.getElementById('spec-stats').innerHTML = `
-        <div class="bg-rose-950/40 border border-rose-800/40 rounded p-1 text-center"><div class="text-rose-400 font-bold">${hpPct}%</div><div class="text-[8px] text-slate-500">HP</div></div>
-        <div class="bg-purple-950/40 border border-purple-800/40 rounded p-1 text-center"><div class="text-purple-300 font-bold">LV.${data.level}</div><div class="text-[8px] text-slate-500">LEVEL</div></div>
-        <div class="bg-amber-950/40 border border-amber-800/40 rounded p-1 text-center"><div class="text-amber-300 font-bold">W${data.wave}</div><div class="text-[8px] text-slate-500">WAVE</div></div>
-        <div class="bg-slate-900/60 border border-slate-700/40 rounded p-1 text-center"><div class="text-slate-200 font-bold">${data.kills}</div><div class="text-[8px] text-slate-500">KILLS</div></div>
-        <div class="bg-yellow-950/40 border border-yellow-800/40 rounded p-1 text-center"><div class="text-yellow-300 font-bold">${(data.score || 0).toLocaleString()}</div><div class="text-[8px] text-slate-500">SCORE</div></div>
-        <div class="bg-emerald-950/40 border border-emerald-800/40 rounded p-1 text-center"><div class="text-emerald-300 font-bold">${data.enemyCount || 0}</div><div class="text-[8px] text-slate-500">ENEMIES</div></div>
+        <div class="bg-purple-950/40 border border-purple-800/40 rounded-lg p-2 text-center"><div class="text-purple-300 font-bold text-base">LV.${data.level}</div><div class="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Level</div></div>
+        <div class="bg-amber-950/40 border border-amber-800/40 rounded-lg p-2 text-center"><div class="text-amber-300 font-bold text-base">${data.wave}/50</div><div class="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Wave</div></div>
+        <div class="bg-rose-950/40 border border-rose-800/40 rounded-lg p-2 text-center"><div class="text-rose-300 font-bold text-base">${data.kills}</div><div class="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Kills</div></div>
+        <div class="bg-yellow-950/40 border border-yellow-800/40 rounded-lg p-2 text-center"><div class="text-yellow-300 font-bold text-base">${(data.score || 0).toLocaleString()}</div><div class="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Score</div></div>
+        <div class="bg-emerald-950/40 border border-emerald-800/40 rounded-lg p-2 text-center"><div class="text-emerald-300 font-bold text-base">${data.enemyCount || 0}</div><div class="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Enemies</div></div>
+        <div class="bg-slate-900/60 border border-slate-700/40 rounded-lg p-2 text-center"><div class="text-slate-200 font-bold text-base">${classNames[data.class] || '—'}</div><div class="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Class</div></div>
       `;
     }
 
     // Bind spectator buttons
     document.getElementById('btn-spec-refresh').addEventListener('click', startLiveFeed);
-    document.getElementById('btn-spec-close').addEventListener('click', stopSpectating);
+    document.getElementById('btn-spec-fs-close').addEventListener('click', stopSpectating);
+
+    // ===================== ADMIN REMOTE COMMANDS =====================
+    function showSpecCmdFeedback(msg, color) {
+      const fb = document.getElementById('spec-cmd-feedback');
+      const colorMap = {
+        green: 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300',
+        red: 'bg-rose-950/40 border border-rose-500/40 text-rose-300',
+        amber: 'bg-amber-950/40 border border-amber-500/40 text-amber-300'
+      };
+      fb.textContent = msg;
+      fb.className = `text-center text-[10px] font-display py-1.5 rounded mt-1 ${colorMap[color] || colorMap.amber}`;
+      fb.classList.remove('hidden');
+      setTimeout(() => fb.classList.add('hidden'), 2200);
+    }
+
+    document.querySelectorAll('.spec-cmd').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cmd = btn.dataset.cmd;
+        if (!spectatorState.targetId) {
+          showSpecCmdFeedback('No target selected', 'red');
+          return;
+        }
+        if (!window.fbSendCommand) {
+          showSpecCmdFeedback('Firebase not connected', 'red');
+          return;
+        }
+
+        let payload = { type: cmd };
+        if (cmd === 'msg') {
+          const text = prompt('Enter message to send to player:');
+          if (!text || !text.trim()) return;
+          payload.text = text.slice(0, 100);
+        }
+        if (cmd === 'kill-player') {
+          if (!confirm('☠️ INSTAKILL this player? They will go to game-over screen.')) return;
+        }
+        if (cmd === 'spawn-boss' || cmd === 'spawn-swarm' || cmd === 'kill-player') {
+          // mild safety confirmation handled above for instakill; others just go
+        }
+
+        const ok = await window.fbSendCommand(spectatorState.targetId, payload);
+        if (ok) {
+          showSpecCmdFeedback(`✅ Sent: ${cmd}`, 'green');
+          // Visual button flash
+          btn.style.transform = 'scale(1.1)';
+          setTimeout(() => btn.style.transform = '', 200);
+        } else {
+          showSpecCmdFeedback('❌ Send failed', 'red');
+        }
+      });
+    });
+
+    // ===================== INCOMING COMMAND HANDLER =====================
+    // Player listens for commands the admin sends and executes them
+    function handleAdminCommand(cmd) {
+      const p = gameState.player;
+      // Show notification banner regardless
+      showAdminCommandNotif(cmd);
+
+      switch (cmd.type) {
+        case 'heal':
+          if (p) { p.hp = p.maxHp; updateHUD(); spawnParticles(p.x, p.y, '#10b981', 30, 4, 40, 3, true); playSound('powerup'); }
+          break;
+        case 'god':
+          gameState.godMode = !gameState.godMode;
+          if (p) gameState.floatingTexts.push(new FloatingText(p.x, p.y - 20, gameState.godMode ? '🛡️ GOD MODE ON' : '⚔️ GOD MODE OFF', '#fbbf24', true));
+          break;
+        case 'add-xp':
+          if (p) p.addXp(1000);
+          break;
+        case 'level-up':
+          if (p) p.addXp(p.xpNeeded - p.xp);
+          break;
+        case 'all-spells':
+          if (p) {
+            p.spells.fireball = 5; p.spells.ice = 5; p.spells.lightning = 5;
+            p.spells.shield = 5; p.spells.singularity = 5; p.spells.tornado = 5; p.spells.tidal = 5;
+            Object.keys(spellRegistry).forEach(k => spellRegistry[k].level = 5);
+            updateHUD();
+            playSound('levelup');
+          }
+          break;
+        case 'magnet':
+          gameState.gems.forEach(g => g.pulled = true);
+          break;
+        case 'kill-all':
+          gameState.enemies.slice().forEach(e => e.takeDamage(99999, '#ffffff'));
+          camera.shakeIntensity = 20;
+          break;
+        case 'spawn-boss':
+          if (gameState.active) spawnBoss();
+          break;
+        case 'spawn-swarm':
+          if (gameState.active && p) {
+            for (let i = 0; i < 15; i++) {
+              const angle = Math.random() * Math.PI * 2;
+              const dist = 250 + Math.random() * 150;
+              gameState.enemies.push(new Enemy(p.x + Math.cos(angle) * dist, p.y + Math.sin(angle) * dist, 'swarm'));
+            }
+          }
+          break;
+        case 'dmg-player':
+          if (p) {
+            // bypass godMode check for admin cmd
+            p.hp -= 25;
+            p.damageFlash = 8;
+            updateHUD();
+            playSound('hit');
+            camera.shakeIntensity = 15;
+            if (p.hp <= 0) endGame();
+          }
+          break;
+        case 'kill-player':
+          if (p) {
+            p.hp = 0;
+            updateHUD();
+            camera.shakeIntensity = 25;
+            endGame();
+          }
+          break;
+        case 'msg':
+          // Show big floating message
+          if (p) gameState.floatingTexts.push(new FloatingText(p.x, p.y - 30, '💬 ' + (cmd.text || ''), '#22d3ee', true));
+          break;
+        case 'max-level':
+          if (p) {
+            while (p.level < 25) {
+              p.level++;
+              p.xpNeeded = Math.round(100 * Math.pow(p.level + 1, 1.3));
+            }
+            p.xp = 0;
+            updateHUD();
+            playSound('levelup');
+            spawnParticles(p.x, p.y, '#fbbf24', 50, 5, 50, 4, true);
+          }
+          break;
+        case 'speed-boost':
+          if (p) {
+            p.speed += 3;
+            spawnParticles(p.x, p.y, '#34d399', 25, 4, 30, 3, true);
+          }
+          break;
+        case 'dmg-boost':
+          if (p) {
+            p.damageMult = 10;
+            spawnParticles(p.x, p.y, '#ef4444', 25, 4, 30, 3, true);
+          }
+          break;
+        case 'max-hp':
+          if (p) {
+            p.maxHp += 200;
+            p.hp += 200;
+            updateHUD();
+            spawnParticles(p.x, p.y, '#10b981', 30, 4, 35, 3, true);
+          }
+          break;
+        case 'cooldown':
+          if (p) {
+            p.cooldownMult = Math.max(0.2, p.cooldownMult - 0.5);
+            spawnParticles(p.x, p.y, '#a855f7', 25, 3, 30, 3, true);
+          }
+          break;
+        case 'magnet-range':
+          if (p) {
+            p.magnetRange += 300;
+            spawnParticles(p.x, p.y, '#06b6d4', 30, 4, 35, 3, true);
+          }
+          break;
+        case 'skip-wave':
+          if (gameState.active && gameState.wave < 50) {
+            gameState.wave = Math.min(49, gameState.wave + 5);
+            gameState.lastWaveTime = gameState.time;
+            spawnWaveBanner();
+          }
+          break;
+        case 'trigger-final':
+          if (gameState.active && !gameState.finalWaveTriggered) {
+            gameState.wave = 50;
+            triggerFinalWave();
+          }
+          break;
+        case 'instawin':
+          if (gameState.active) {
+            // Trigger instant victory
+            gameState.finalWaveTriggered = true;
+            gameState.bossesSpawned = 10;
+            gameState.victoryAchieved = true;
+            // Kill any remaining bosses
+            gameState.enemies.filter(e => e.isBoss).forEach(b => b.takeDamage(99999, '#ffffff'));
+            triggerVictory();
+          }
+          break;
+        case 'dmg-big':
+          if (p) {
+            p.hp -= 100;
+            p.damageFlash = 12;
+            updateHUD();
+            playSound('hit');
+            camera.shakeIntensity = 25;
+            if (p.hp <= 0) endGame();
+          }
+          break;
+        case 'freeze':
+          if (p) {
+            // Save and zero out movement speed temporarily
+            if (!p._frozenSavedSpeed) {
+              p._frozenSavedSpeed = p.speed;
+              p.speed = 0;
+              gameState.floatingTexts.push(new FloatingText(p.x, p.y - 30, '🧊 FROZEN!', '#22d3ee', true));
+              setTimeout(() => {
+                if (gameState.player && gameState.player._frozenSavedSpeed) {
+                  gameState.player.speed = gameState.player._frozenSavedSpeed;
+                  gameState.player._frozenSavedSpeed = null;
+                }
+              }, 5000);
+            }
+          }
+          break;
+        case 'dispel':
+          if (p) {
+            // Reset all spells to level 0 (except the starting one which goes to 1)
+            const baseStart = playerStats[p.class].startingSpell;
+            Object.keys(p.spells).forEach(k => p.spells[k] = 0);
+            p.spells[baseStart] = 1;
+            Object.keys(spellRegistry).forEach(k => spellRegistry[k].level = (k === baseStart ? 1 : 0));
+            updateHUD();
+            gameState.floatingTexts.push(new FloatingText(p.x, p.y - 30, '🚫 SPELLS RESET', '#ef4444', true));
+          }
+          break;
+        case 'reset-stats':
+          if (p) {
+            // Reset to base class stats
+            const base = playerStats[p.class];
+            p.maxHp = base.maxHp;
+            p.hp = Math.min(p.hp, p.maxHp);
+            p.speed = base.speed;
+            p.damageMult = base.damageMult;
+            p.cooldownMult = base.cooldownMult;
+            p.magnetRange = base.magnetRange;
+            updateHUD();
+            gameState.floatingTexts.push(new FloatingText(p.x, p.y - 30, '🔄 BUFFS RESET', '#fb7185', true));
+          }
+          break;
+        case 'unlock-ach':
+          Object.keys(ACHIEVEMENTS).forEach(k => unlockAchievement(k));
+          break;
+        case 'boost-lb':
+          submitToLeaderboard({
+            win: true,
+            level: 99,
+            xp: 99999,
+            kills: 9999,
+            score: 999999,
+            class: gameState.classSelected || 'pyro'
+          });
+          break;
+        case 'screen-shake':
+          camera.shakeIntensity = 35;
+          break;
+        case 'flash':
+          flashScreen();
+          break;
+        case 'teleport':
+          if (p) {
+            const tx = p.x + (Math.random() - 0.5) * 800;
+            const ty = p.y + (Math.random() - 0.5) * 800;
+            spawnParticles(p.x, p.y, '#a855f7', 30, 5, 30, 4, true);
+            p.x = tx;
+            p.y = ty;
+            spawnParticles(p.x, p.y, '#a855f7', 30, 5, 30, 4, true);
+            playSound('lightning');
+          }
+          break;
+      }
+    }
+
+    function showAdminCommandNotif(cmd) {
+      const labels = {
+        heal: '💚 Admin healed you to full!',
+        god: '🛡️ Admin toggled God Mode',
+        'add-xp': '✨ Admin gave you +1000 XP',
+        'level-up': '⭐ Admin leveled you up!',
+        'max-level': '⭐⭐ Admin set you to MAX LEVEL!',
+        'all-spells': '🔮 Admin maxed all your spells!',
+        'speed-boost': '⚡ Admin granted MEGA SPEED!',
+        'dmg-boost': '💥 Admin granted 1000% DAMAGE!',
+        'max-hp': '❤️ Admin gave you +200 Max HP!',
+        cooldown: '⏳ Admin reduced your cooldowns by 50%!',
+        'magnet-range': '🧲 Admin gave you a HUGE magnet!',
+        magnet: '🧲 Admin pulled all gems',
+        'kill-all': '💀 Admin wiped all enemies!',
+        'spawn-boss': '👁️ Admin spawned a BOSS!',
+        'spawn-swarm': '🐛 Admin spawned a SWARM!',
+        'skip-wave': '⏭️ Admin skipped you +5 waves',
+        'trigger-final': '👑 Admin triggered the FINAL WAVE!',
+        instawin: '🏆 Admin granted you INSTANT VICTORY!',
+        'dmg-player': '💥 Admin dealt 25 damage to you',
+        'dmg-big': '💥💥 Admin SLAMMED you for 100 damage!',
+        'kill-player': '☠️ Admin INSTAKILLED you',
+        freeze: '🧊 Admin FROZE you for 5 seconds!',
+        dispel: '🚫 Admin reset your spells!',
+        'reset-stats': '🔄 Admin reset your buffs to base!',
+        'unlock-ach': '🏅 Admin unlocked all achievements!',
+        'boost-lb': '🏆 Admin boosted your leaderboard entry!',
+        'screen-shake': '📳 Admin shook the screen!',
+        flash: '⚡ Admin flashed your screen!',
+        teleport: '🌀 Admin teleported you!',
+        msg: '💬 ' + (cmd.text || 'Message from admin')
+      };
+      const isHostile = ['kill-all','dmg-player','dmg-big','kill-player','spawn-boss','spawn-swarm','freeze','dispel','reset-stats','screen-shake','teleport'].includes(cmd.type);
+      const color = isHostile ? 'rose' : 'emerald';
+
+      // Reuse achievement-stack container
+      const stack = document.getElementById('achievement-stack');
+      if (!stack) return;
+      const popup = document.createElement('div');
+      popup.className = `admin-cmd-notif glassmorphism border ${color === 'rose' ? 'border-rose-500/60 bg-rose-950/40 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-emerald-500/60 bg-emerald-950/40 shadow-[0_0_20px_rgba(16,185,129,0.3)]'} px-4 py-2.5 rounded-xl flex items-center gap-2 max-w-xs`;
+      popup.innerHTML = `
+        <div class="text-2xl">👑</div>
+        <div>
+          <div class="text-[9px] font-display tracking-widest text-rose-300 uppercase">Admin Command</div>
+          <div class="font-display font-bold text-xs text-slate-100">${labels[cmd.type] || cmd.type}</div>
+        </div>
+      `;
+      stack.appendChild(popup);
+      setTimeout(() => popup.remove(), 4000);
+    }
+
+    // Subscribe to incoming commands once Firebase is ready
+    (async () => {
+      let tries = 0;
+      while (!window.fbListenCommands && tries < 30) {
+        await new Promise(r => setTimeout(r, 200));
+        tries++;
+      }
+      if (window.fbListenCommands) {
+        window.fbListenCommands(handleAdminCommand);
+        console.log('🎯 Listening for incoming admin commands...');
+      }
+    })();
 
     // ==================== SPECTATOR DIAGNOSTICS ====================
     function setSpecDiag(html, color = 'slate') {
@@ -4252,12 +5077,15 @@
       // Step 3: Run the actual test
       try {
         const result = await window.fbTestRtdb();
+        const rulesUrl = 'https://console.firebase.google.com/project/spellweaver-f5ca2/database/spellweaver-f5ca2-default-rtdb/rules';
         if (result.write === 'OK' && result.read && result.read.startsWith('OK')) {
           setSpecDiag(`✅ ALL GOOD!<br>Write: ${result.write} • Read: ${result.read}<br>Now click "START LIVE FEED" 👇`, 'green');
         } else if (result.write === 'OK' && (!result.read || !result.read.startsWith('OK'))) {
-          setSpecDiag(`⚠️ Write OK but Read FAILED<br>Error: ${result.error || 'timeout'}<br>Set ".read": true on /sessions`, 'amber');
+          setSpecDiag(`⚠️ Write OK but READ FAILED<br>Error: ${result.error || 'timeout'}<br>👉 <a href="${rulesUrl}" target="_blank" class="text-amber-300 underline font-bold">CLICK HERE → Set <code class="bg-slate-900 px-1 rounded">.read: true</code> on /sessions</a>`, 'amber');
+        } else if (result.error && result.error.includes('PERMISSION_DENIED')) {
+          setSpecDiag(`❌ PERMISSION_DENIED — Rules block writes<br>👉 <a href="${rulesUrl}" target="_blank" class="text-rose-200 underline font-bold">CLICK HERE → Open Firebase Rules</a><br>Paste this exactly:<br><code class="bg-slate-900 px-2 py-1 rounded text-[9px] block mt-1">{"rules":{"sessions":{".read":true,".write":true}}}</code>`, 'red');
         } else {
-          setSpecDiag(`❌ WRITE FAILED<br>Error: ${result.error || 'unknown'}<br>👉 Publish RTDB rules! See instructions in chat.`, 'red');
+          setSpecDiag(`❌ WRITE FAILED — ${result.error || 'unknown'}<br>👉 <a href="${rulesUrl}" target="_blank" class="text-rose-200 underline font-bold">Open Firebase Rules</a> and publish proper rules.`, 'red');
         }
       } catch (err) {
         setSpecDiag(`❌ Test threw error: ${err.message}`, 'red');
