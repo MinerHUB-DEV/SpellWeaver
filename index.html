@@ -217,6 +217,27 @@
           } catch (err) { console.warn("Season reset failed", err); return null; }
         };
 
+        // === LEADERBOARD RESET COUNTDOWN (separate from season — admin controlled) ===
+        window.fbGetLbCountdownStart = async function() {
+          try {
+            const ref = doc(db, "config", "leaderboard_countdown");
+            const snap = await getDoc(ref);
+            if (snap.exists() && snap.data().startTime) return snap.data().startTime;
+            // First time — initialize globally
+            const now = Date.now();
+            await setDoc(ref, { startTime: now, durationDays: 9 });
+            return now;
+          } catch (err) { console.warn("LB countdown fetch failed", err); return null; }
+        };
+        window.fbResetLbCountdown = async function() {
+          try {
+            const ref = doc(db, "config", "leaderboard_countdown");
+            const now = Date.now();
+            await setDoc(ref, { startTime: now, durationDays: 9, resetAt: now });
+            return now;
+          } catch (err) { console.warn("LB countdown reset failed", err); return null; }
+        };
+
         // === REALTIME DATABASE (live sessions for admin spectator) ===
         try {
           const rtdb = getDatabase(app);
@@ -1400,7 +1421,7 @@
             <button class="admin-btn" data-action="unlock-all-ach">🏅 Unlock All Achievements</button>
             <button class="admin-btn" data-action="boost-leaderboard">🏆 Boost My Leaderboard</button>
             <button class="admin-btn" data-action="reset-ach">🔄 Reset Achievements</button>
-            <button class="admin-btn" data-action="reset-season">📅 Reset Season Timer</button>
+            <button class="admin-btn" data-action="reset-season">📅 Reset Season + LB Timer</button>
           </div>
         </div>
 
@@ -1851,6 +1872,15 @@
         <div class="flex items-center gap-2">
           <div id="leaderboard-status" class="flex-1 text-[10px] text-center font-display tracking-wider py-1.5 bg-slate-900/40 border border-slate-800/40 rounded">⏳ Connecting...</div>
           <button id="btn-lb-refresh" class="text-[10px] font-display font-bold px-3 py-1.5 bg-amber-700/30 hover:bg-amber-600/40 border border-amber-500/40 rounded text-amber-200 cursor-pointer transition" title="Refresh leaderboard">🔄</button>
+        </div>
+
+        <!-- Leaderboard Reset Countdown Banner (synced with season) -->
+        <div id="lb-reset-banner" class="px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-rose-600/20 via-pink-500/20 to-rose-600/20 border border-rose-500/40 text-rose-200">
+          <span class="text-base">⏰</span>
+          <span class="flex-1 text-center">
+            <span class="text-[9px] text-rose-300/80 tracking-widest uppercase">Leaderboard Resets When Season Ends</span>
+            <span id="lb-reset-countdown" class="block text-rose-100 text-sm font-extrabold tracking-wider">10d 00h</span>
+          </span>
         </div>
 
         <!-- Tabs -->
@@ -2772,6 +2802,8 @@
           this.x += (dx / length) * this.speed;
           this.y += (dy / length) * this.speed;
           this.facing = Math.atan2(dy, dx);
+          // Reset AFK counter — player is moving
+          this.afkFrames = 0;
 
           // Emit beautiful dust trails based on graphics level
           if (Math.random() < 0.4 && gameState.graphicsQuality !== 'low') {
@@ -2785,6 +2817,57 @@
               1 + Math.random() * 2,
               20
             ));
+          }
+        } else {
+          // === ANTI-AFK SYSTEM ===
+          // Don't penalize during wave breaks or if game isn't fully active
+          if (!gameState.waveBreakUntil || Date.now() >= gameState.waveBreakUntil) {
+            this.afkFrames = (this.afkFrames || 0) + 1;
+
+            // 600 frames = 10 seconds — early warning
+            if (this.afkFrames === 600) {
+              gameState.floatingTexts.push(new FloatingText(this.x, this.y - 30, '⚠️ KEEP MOVING! ⚠️', '#fbbf24', true));
+              playSound('hit');
+            }
+            // 780 frames = 13 seconds — final warning
+            if (this.afkFrames === 780) {
+              gameState.floatingTexts.push(new FloatingText(this.x, this.y - 30, '☠️ MOVE NOW! ☠️', '#ef4444', true));
+              playSound('hit');
+            }
+
+            // After 15 seconds (900 frames), take -20 HP every SECOND until they move
+            if (this.afkFrames > 900) {
+              // Tick once per second (every 60 frames)
+              if (this.afkFrames % 60 === 0) {
+                const tickDmg = 20;
+                // Bypass i-frames so AFK damage always lands
+                this.hp -= tickDmg;
+                this.damageFlash = 8;
+                updateHUD();
+                gameState.floatingTexts.push(new FloatingText(this.x, this.y - 12, `🥀 AFK -${tickDmg}`, '#ef4444', true));
+                spawnParticles(this.x, this.y, '#ef4444', 12, 4, 25, 3, true);
+                camera.shakeIntensity = 8;
+                if (this.hp <= 0) {
+                  endGame();
+                  return;
+                }
+              }
+              // Continuous wilting smoke effect to make it visually obvious
+              if (this.afkFrames % 8 === 0 && gameState.graphicsQuality !== 'low') {
+                gameState.particles.push(new Particle(
+                  this.x + (Math.random() - 0.5) * 20,
+                  this.y - 12 - Math.random() * 8,
+                  (Math.random() - 0.5) * 0.6,
+                  -1.2 - Math.random() * 0.7,
+                  '#475569',
+                  2 + Math.random() * 2.5,
+                  35
+                ));
+              }
+            }
+          } else {
+            // Wave break — reset AFK so it doesn't trigger immediately when break ends
+            this.afkFrames = 0;
           }
         }
 
@@ -3208,6 +3291,20 @@
           return;
         }
 
+        // Magic SHIELD absorbs damage first
+        if (this.shield && this.shield > 0) {
+          const absorbed = Math.min(this.shield, amount);
+          this.shield -= absorbed;
+          amount -= absorbed;
+          this.shieldBrokenTimer = this.shieldRegenDelay || 1800; // start regen delay
+          gameState.floatingTexts.push(new FloatingText(this.x, this.y - 12, `🛡️ -${Math.round(absorbed)}`, '#60a5fa', false));
+          spawnParticles(this.x, this.y, '#60a5fa', 8, 3, 20, 2);
+          if (amount <= 0) {
+            this.invincible = 15;
+            return;
+          }
+        }
+
         this.hp -= amount;
         this.damageFlash = 8;
         this.invincible = 25 + (this.iframeBonus || 0); // base + bonus i-frames
@@ -3483,7 +3580,8 @@
         this.type = type; // swarm, bruiser, shooter, boss
 
         // Scaling parameters based on active waves
-        const waveScalar = 1 + (gameState.wave - 1) * 0.22;
+        // HARDER: enemies grow 35% stronger per wave (was 22%)
+        const waveScalar = 1 + (gameState.wave - 1) * 0.35;
 
         this.slowDuration = 0; // frozen/slow ticks
 
@@ -3516,7 +3614,8 @@
           case 'boss':
             this.radius = 35;
             this.speed = 1.3;
-            this.hp = 1200 * (1 + (gameState.wave - 1) * 0.4);
+            // HARDER: bosses much tougher, scales 70% per wave (was 40%)
+            this.hp = 1500 * (1 + (gameState.wave - 1) * 0.7);
             this.color = '#ec4899'; // Abyssal pink boss
             this.points = 500;
             this.isShooter = true;
@@ -3859,12 +3958,12 @@
             spawnParticles(this.x, this.y, '#ec4899', 1, 8, 50, 5, true);
           }
         } else {
-          // Normal monster drops
+          // Normal monster drops — HARDER: rarer hearts and magnets
           const roll = Math.random();
-          if (roll < 0.05) {
-            gameState.gems.push(new Gem(this.x, this.y, 'heart')); // healing heart
-          } else if (roll < 0.08) {
-            gameState.gems.push(new Gem(this.x, this.y, 'magnet')); // item magnet
+          if (roll < 0.02) {
+            gameState.gems.push(new Gem(this.x, this.y, 'heart')); // healing heart (was 5%)
+          } else if (roll < 0.04) {
+            gameState.gems.push(new Gem(this.x, this.y, 'magnet')); // item magnet (was 8%)
           } else {
             // XP Gems — gold drop bonus increases chance for purple/gold
             const goldBonus = (player && player.goldDropBonus) || 0;
@@ -4204,7 +4303,23 @@
       startGame();
     });
     document.getElementById('btn-return-menu').addEventListener('click', () => {
+      // Fully clean up — kill all timers, hide game screen, return to menu
+      stopGame();
+      gameState.player = null;
+      gameState.enemies = [];
+      gameState.projectiles = [];
+      gameState.gems = [];
+      gameState.particles = [];
+      gameState.floatingTexts = [];
+      gameState.activeBoss = null;
+      // End RTDB session if one is live
+      if (window.fbEndSession) window.fbEndSession();
+      // Hide gameover + game screens, show main menu
       document.getElementById('screen-gameover').classList.add('hidden');
+      document.getElementById('screen-game').classList.add('hidden');
+      document.getElementById('boss-hp-container')?.classList.add('hidden');
+      document.getElementById('hud-boss-warning')?.classList.add('hidden');
+      document.getElementById('combo-display')?.classList.add('hidden');
       document.getElementById('screen-menu').classList.remove('hidden');
     });
 
@@ -5174,7 +5289,8 @@
                   seasonStartCached = newStart;
                   localStorage.setItem('spellweaver_season_start', newStart.toString());
                   updateSeasonCountdown();
-                  showAdminFeedback('📅 GLOBAL season reset (everyone sees +30d)', 'green');
+                  updateLbCountdown(); // sync LB display
+                  showAdminFeedback('📅 GLOBAL season + LB reset (everyone sees +10d)', 'green');
                   return;
                 }
               }
@@ -5183,7 +5299,8 @@
               seasonStartCached = now;
               localStorage.setItem('spellweaver_season_start', now.toString());
               updateSeasonCountdown();
-              showAdminFeedback('📅 Local season reset (Firestore offline)', 'green');
+              updateLbCountdown();
+              showAdminFeedback('📅 Local season + LB reset (Firestore offline)', 'green');
             })();
             break;
           case 'reset-all-stats':
@@ -5221,6 +5338,8 @@
                 // Force-refresh local cache so this client sees empty immediately
                 window._lbCachedCutoff = Date.now();
                 window._lbCutoffFetchTime = Date.now();
+                // Refresh LB countdown display (still tied to season timer)
+                updateLbCountdown();
                 await new Promise(r => setTimeout(r, 500));
 
                 // STEP 2: Pause saving
@@ -5417,7 +5536,46 @@
     setInterval(async () => {
       await fetchGlobalSeasonStart();
       updateSeasonCountdown();
+      updateLbCountdown(); // keep LB countdown in sync
     }, 5 * 60 * 1000);
+
+    // ===================== LEADERBOARD RESET COUNTDOWN (mirrors season timer) =====================
+    function updateLbCountdown() {
+      // Use the SAME end time as the season
+      const end = getSeasonEnd();
+      const remaining = end - Date.now();
+      const banner = document.getElementById('lb-reset-banner');
+      const txt = document.getElementById('lb-reset-countdown');
+      if (!txt) return;
+
+      if (remaining <= 0) {
+        txt.textContent = 'ENDED!';
+        if (banner) banner.className = 'px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-rose-700/40 to-red-700/40 border-2 border-rose-500/70 text-rose-100 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse';
+        return;
+      }
+
+      const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+      const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+      const mins = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+
+      if (days > 0) {
+        txt.textContent = `${days}d ${hours.toString().padStart(2,'0')}h`;
+      } else if (hours > 0) {
+        txt.textContent = `${hours}h ${mins.toString().padStart(2,'0')}m`;
+      } else {
+        const secs = Math.floor((remaining % 60000) / 1000);
+        txt.textContent = `${mins}m ${secs.toString().padStart(2,'0')}s`;
+      }
+
+      // Last 24h pulse red urgently
+      if (banner && days < 1) {
+        banner.className = 'px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-rose-600/40 to-orange-500/40 border-2 border-rose-500/60 text-rose-100 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse';
+      }
+    }
+
+    // Tick every 30s (uses the season cache, no separate Firestore fetches needed)
+    updateLbCountdown();
+    setInterval(updateLbCountdown, 30000);
 
     // ===================== LIVE SPECTATOR SYSTEM =====================
     const spectatorState = {
@@ -6403,12 +6561,26 @@
           gameState.time++;
           
           // Wave trigger increments every 45 seconds (CAP at WAVE 50)
-          if (gameState.wave < 50 && gameState.time - gameState.lastWaveTime >= 45) {
+          // HARDER: each wave lasts 75 seconds (was 45) — total run to wave 50: ~62 minutes
+          if (gameState.wave < 50 && gameState.time - gameState.lastWaveTime >= 75) {
             gameState.wave++;
             gameState.lastWaveTime = gameState.time;
             spawnWaveBanner();
             // Battle Pass XP per wave survived
             addBpXp(40, 'wave');
+
+            // === 5-SECOND WAVE BREAK COOLDOWN ===
+            // Wipe ALL existing enemies + no new spawns during the 5s break
+            gameState.waveBreakUntil = Date.now() + 5000;
+            // Kill all current enemies dramatically (skip bosses — they're rare events)
+            const toWipe = gameState.enemies.filter(e => !e.isBoss);
+            toWipe.forEach(e => {
+              spawnParticles(e.x, e.y, e.color, 12, 4, 25, 3, true);
+            });
+            gameState.enemies = gameState.enemies.filter(e => e.isBoss);
+            camera.shakeIntensity = 12;
+            playSound('powerup');
+            showWaveBreakBanner(5);
 
             // === FINAL WAVE: spawn 10 BOSSES ===
             if (gameState.wave === 50) {
@@ -6458,9 +6630,10 @@
             spawnEnemyGroup();
           }
           // Accelerate spawning up to a soft limit of 500ms
-          const dynamicRate = Math.max(450, 1500 - (gameState.time * 6));
+          // HARDER: spawn rate scales faster + lower cap (250ms vs 450ms)
+          const dynamicRate = Math.max(250, 1400 - (gameState.time * 9));
           queueNextSpawn();
-        }, Math.max(450, 1500 - (gameState.time * 6)));
+        }, Math.max(250, 1400 - (gameState.time * 9)));
       }
       queueNextSpawn();
 
@@ -6625,9 +6798,12 @@
 
     function spawnEnemyGroup() {
       if (!gameState.player) return;
-      
+      // ⏸️ Don't spawn during wave break cooldown
+      if (gameState.waveBreakUntil && Date.now() < gameState.waveBreakUntil) return;
+
       // Select monster spawn coordinates radial outside player viewport bounds
-      const spawnCount = Math.ceil(1 + (gameState.wave * 0.6) + (Math.random() * 2));
+      // HARDER: more enemies per spawn group, scales much harder per wave
+      const spawnCount = Math.ceil(2 + (gameState.wave * 1.0) + (Math.random() * 3));
       const p = gameState.player;
 
       // Select monster types pool based on current wave thresholds
@@ -6688,6 +6864,37 @@
       playSound('levelup');
     }
 
+    // === WAVE BREAK COUNTDOWN BANNER (5-second cooldown) ===
+    function showWaveBreakBanner(seconds) {
+      let banner = document.getElementById('wave-break-banner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'wave-break-banner';
+        banner.className = 'absolute top-1/3 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-6 py-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-cyan-950/90 to-emerald-950/90 border-2 border-emerald-400/60 shadow-[0_0_40px_rgba(16,185,129,0.4)] text-center';
+        const screen = document.getElementById('screen-game');
+        if (screen) screen.appendChild(banner);
+      }
+      banner.style.display = 'block';
+      let left = seconds;
+      const render = () => {
+        banner.innerHTML = `
+          <div class="text-[10px] font-display tracking-[0.3em] text-emerald-300 uppercase mb-1">⚡ Wave Break ⚡</div>
+          <div class="font-fantasy text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-cyan-300 to-emerald-300">${left}</div>
+          <div class="text-[10px] font-display text-slate-300 mt-1">Catch your breath, mage. Next wave incoming...</div>
+        `;
+      };
+      render();
+      const tick = setInterval(() => {
+        left--;
+        if (left <= 0) {
+          clearInterval(tick);
+          banner.style.display = 'none';
+        } else {
+          render();
+        }
+      }, 1000);
+    }
+
     // === FINAL WAVE: spawn 10 bosses dramatically over a few seconds ===
     function triggerFinalWave() {
       gameState.finalWaveTriggered = true;
@@ -6727,7 +6934,8 @@
         const by = p.y + Math.sin(angle) * 600;
         const boss = new Enemy(bx, by, 'boss');
         // Slightly weaken final-wave bosses since there are 10 of them
-        boss.hp = boss.maxHp = boss.maxHp * 0.45;
+        // HARDER: final-wave bosses retain 70% of their HP (was 45%) — much tougher fight
+        boss.hp = boss.maxHp = boss.maxHp * 0.70;
         gameState.enemies.push(boss);
         gameState.activeBoss = boss; // last spawned tracked for HP bar
         document.getElementById('boss-hp-container').classList.remove('hidden');
@@ -6805,10 +7013,27 @@
       const choices = buildUpgradePool(p);
 
       // Pull 3 unique random options from the pool
+      // === WEIGHTED RARITY DRAFT ===
+      // Common upgrades show up frequently; Epic = harder; Legendary = very rare
+      const rarityWeights = { Common: 60, Rare: 25, Epic: 10, Legendary: 3 };
       const selectedChoices = [];
+
+      function weightedPick(pool) {
+        // Sum total weights of all candidates
+        let total = 0;
+        pool.forEach(c => { total += (rarityWeights[c.rarity] || 30); });
+        let roll = Math.random() * total;
+        for (let i = 0; i < pool.length; i++) {
+          const w = rarityWeights[pool[i].rarity] || 30;
+          if (roll < w) return i;
+          roll -= w;
+        }
+        return pool.length - 1;
+      }
+
       while (selectedChoices.length < 3 && choices.length > 0) {
-        const randIdx = Math.floor(Math.random() * choices.length);
-        selectedChoices.push(choices.splice(randIdx, 1)[0]);
+        const idx = weightedPick(choices);
+        selectedChoices.push(choices.splice(idx, 1)[0]);
       }
 
       // Fallback in case pool empty (highly leveled spells, give passive buffs)
@@ -7086,6 +7311,56 @@
         rarity: 'Legendary'
       });
 
+      // ========== 6 BRAND NEW UPGRADES ==========
+
+      pool.push({
+        type: 'passive',
+        stat: 'shieldRegen',
+        title: '🛡️ Aetherbarrier',
+        desc: 'Gain a 30 HP magic shield that regenerates 30s after taking damage.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'piercing',
+        title: '➡️ Piercing Arcana',
+        desc: 'All projectiles pierce through +1 enemy before vanishing.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'enemySlow',
+        title: '🕸️ Web of Time',
+        desc: 'Aura slows ALL enemies within 200px by 30%.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'frenzy',
+        title: '🔥 Berserker Frenzy',
+        desc: 'Deal +50% MORE damage when below 30% HP.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'goldenLuck',
+        title: '🍀 Golden Luck',
+        desc: 'Gold gem chance TRIPLED + auto-pulls them from 2x further away.',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'phoenix',
+        title: '🔥🦅 Phoenix Pact',
+        desc: 'LEGENDARY: Once per run, revive with 50% HP + clear all enemies on death!',
+        rarity: 'Legendary'
+      });
+
       return pool;
     }
 
@@ -7187,6 +7462,32 @@
             p.damageMult += 0.20;
             p.speed *= 1.20;
             p.cooldownMult = Math.max(0.2, p.cooldownMult - 0.20);
+            break;
+
+          // === 6 BRAND NEW UPGRADE EFFECTS ===
+          case 'shieldRegen':
+            p.shieldMax = (p.shieldMax || 0) + 30;
+            p.shield = (p.shield || 0) + 30;
+            p.shieldRegenDelay = 1800; // 30s @ 60fps
+            spawnParticles(p.x, p.y, '#60a5fa', 25, 4, 30, 3, true);
+            break;
+          case 'piercing':
+            p.bonusPierce = (p.bonusPierce || 0) + 1;
+            break;
+          case 'enemySlow':
+            p.slowAura = (p.slowAura || 0) + 0.30;
+            p.slowAuraRadius = Math.max(p.slowAuraRadius || 0, 200);
+            break;
+          case 'frenzy':
+            p.frenzyBonus = (p.frenzyBonus || 0) + 0.50;
+            break;
+          case 'goldenLuck':
+            p.goldDropBonus = (p.goldDropBonus || 0) + 2.0; // big multiplier
+            p.magnetRange += 80;
+            break;
+          case 'phoenix':
+            p.phoenixCharges = (p.phoenixCharges || 0) + 1;
+            spawnParticles(p.x, p.y, '#fbbf24', 50, 5, 50, 5, true);
             break;
         }
         gameState.floatingTexts.push(new FloatingText(p.x, p.y - 20, `PASSIVE ENCHANTED: ${choice.title.toUpperCase()}`, '#facc15', true));
