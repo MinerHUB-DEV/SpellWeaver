@@ -6568,6 +6568,7 @@
       gameState.victoryAchieved = false;
       gameState.bossesSpawned = 0;
       gameState.bossesDefeated = 0;
+      gameState._errorCount = 0; // reset auto-recovery error counter
 
       // Create new Player Mage
       gameState.player = new Player(0, 0, gameState.classSelected);
@@ -7731,113 +7732,124 @@
 
     // --- GAME ENGINE LOOP TICK (60FPS RECURRENCE) ---
 
+    // Helper: safely run a function, log + skip if it throws
+    function safeRun(label, fn) {
+      try { fn(); } catch (err) {
+        console.error(`❌ Error in ${label}:`, err);
+        gameState._errorCount = (gameState._errorCount || 0) + 1;
+        // If TOO many errors fire, force-end the game cleanly
+        if (gameState._errorCount > 100) {
+          console.error('💀 Too many errors — auto-ending game to recover');
+          if (gameState.player) gameState.player.hp = 0;
+          try { endGame(); } catch (e) {}
+        }
+      }
+    }
+
+    // Helper: safely iterate an array, removing any item that throws
+    function safeForEach(label, arr, fn) {
+      if (!arr || !arr.length) return;
+      // Iterate backwards so we can splice broken items
+      for (let i = arr.length - 1; i >= 0; i--) {
+        try { fn(arr[i], i); } catch (err) {
+          console.error(`❌ ${label} item ${i} crashed — removing:`, err, arr[i]);
+          arr.splice(i, 1);
+        }
+      }
+    }
+
     function gameLoop() {
       if (!gameState.active) return;
 
-      if (!gameState.paused) {
-        // 1. UPDATE PHASE
-        gameState.player.update();
-        camera.update();
-        
-        // Tick combo timer
-        if (gameState.comboTimer > 0) {
-          gameState.comboTimer--;
-          updateComboDisplay();
-          if (gameState.comboTimer <= 0) breakCombo();
-        }
-        
-        // Update boss HP bar
-        updateBossHpBar();
-        // Update vignette
-        updateVignette();
-        // Check achievements every few frames
-        if (Math.random() < 0.05) checkAchievements();
+      try {
+        if (!gameState.paused) {
+          // 1. UPDATE PHASE — every section is now wrapped so one crash can't freeze the whole loop
+          if (gameState.player) {
+            safeRun('player.update', () => gameState.player.update());
+          }
+          safeRun('camera.update', () => camera.update());
 
-        // Target smooth follow player with slight lag dampening
-        camera.x += (gameState.player.x - window.innerWidth / 2 - camera.x) * 0.12;
-        camera.y += (gameState.player.y - window.innerHeight / 2 - camera.y) * 0.12;
-
-        // Update Projectiles
-        gameState.projectiles.forEach(proj => {
-          proj.update();
-          
-          // Collision checks: player projectiles hit monsters
-          if (proj.type !== 'enemy-ball' && proj.type !== 'singularity') {
-            gameState.enemies.forEach(enemy => {
-              if (proj.hasHit) return;
-              const dist = Math.hypot(enemy.x - proj.x, enemy.y - proj.y);
-              if (dist < enemy.radius + proj.size) {
-                proj.hitEnemy(enemy);
-              }
+          // Tick combo timer
+          if (gameState.comboTimer > 0) {
+            safeRun('combo', () => {
+              gameState.comboTimer--;
+              updateComboDisplay();
+              if (gameState.comboTimer <= 0) breakCombo();
             });
           }
 
-          // Collision checks: enemy projectiles hitting player
-          if (proj.type === 'enemy-ball') {
-            const player = gameState.player;
-            const dist = Math.hypot(player.x - proj.x, player.y - proj.y);
-            if (dist < player.radius + proj.size) {
-              player.takeDamage(proj.damage);
-              proj.hasHit = true;
-            }
+          safeRun('bossHpBar', () => updateBossHpBar());
+          safeRun('vignette', () => updateVignette());
+          if (Math.random() < 0.05) safeRun('achievements', () => checkAchievements());
+
+          // Target smooth follow player with slight lag dampening
+          if (gameState.player) {
+            safeRun('camera follow', () => {
+              camera.x += (gameState.player.x - window.innerWidth / 2 - camera.x) * 0.12;
+              camera.y += (gameState.player.y - window.innerHeight / 2 - camera.y) * 0.12;
+            });
           }
-        });
 
-        // Filter expired projectiles
-        gameState.projectiles = gameState.projectiles.filter(proj => proj.life > 0 && !proj.hasHit);
+          // Update Projectiles + collisions (each one isolated)
+          safeForEach('projectile.update', gameState.projectiles, (proj) => {
+            proj.update();
+            if (proj.type !== 'enemy-ball' && proj.type !== 'singularity') {
+              safeForEach('proj-vs-enemy', gameState.enemies, (enemy) => {
+                if (proj.hasHit) return;
+                const dist = Math.hypot(enemy.x - proj.x, enemy.y - proj.y);
+                if (dist < enemy.radius + proj.size) {
+                  proj.hitEnemy(enemy);
+                }
+              });
+            }
+            if (proj.type === 'enemy-ball') {
+              const player = gameState.player;
+              if (player) {
+                const dist = Math.hypot(player.x - proj.x, player.y - proj.y);
+                if (dist < player.radius + proj.size) {
+                  player.takeDamage(proj.damage);
+                  proj.hasHit = true;
+                }
+              }
+            }
+          });
 
-        // Update Enemies
-        gameState.enemies.forEach(enemy => enemy.update());
+          gameState.projectiles = gameState.projectiles.filter(proj => proj.life > 0 && !proj.hasHit);
 
-        // Update Gems pickups
-        gameState.gems.forEach(gem => gem.update());
+          safeForEach('enemy.update', gameState.enemies, (enemy) => enemy.update());
+          safeForEach('gem.update', gameState.gems, (gem) => gem.update());
+          safeForEach('particle.update', gameState.particles, (p) => p.update());
+          gameState.particles = gameState.particles.filter(p => p.life > 0);
+          safeForEach('floatText.update', gameState.floatingTexts, (ft) => ft.update());
+          gameState.floatingTexts = gameState.floatingTexts.filter(ft => ft.life > 0);
+        }
 
-        // Update Particles
-        gameState.particles.forEach(p => p.update());
-        gameState.particles = gameState.particles.filter(p => p.life > 0);
+        // 2. RENDER PHASE
+        safeRun('clearRect', () => ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height));
 
-        // Update Floating Text tags
-        gameState.floatingTexts.forEach(ft => ft.update());
-        gameState.floatingTexts = gameState.floatingTexts.filter(ft => ft.life > 0);
+        ctx.save();
+        safeRun('camera.apply', () => camera.apply(ctx));
+        safeRun('drawMapGrid', () => drawMapGrid(ctx));
+        safeRun('drawBgRunes', () => drawBgRunes(ctx));
+
+        safeForEach('gem.draw', gameState.gems, (gem) => gem.draw(ctx));
+        if (gameState.player) safeRun('player.draw', () => gameState.player.draw(ctx));
+        safeForEach('enemy.draw', gameState.enemies, (enemy) => enemy.draw(ctx));
+        safeForEach('proj.draw', gameState.projectiles, (proj) => proj.draw(ctx));
+        safeForEach('particle.draw', gameState.particles, (p) => p.draw(ctx));
+        safeForEach('floatText.draw', gameState.floatingTexts, (ft) => ft.draw(ctx));
+
+        ctx.restore();
+        safeRun('minimap', () => drawMinimap());
+
+      } catch (err) {
+        // Last-resort catcher — even if EVERYTHING explodes, the loop self-heals next frame
+        console.error('💀 GAME LOOP CRASHED — auto-recovering:', err);
+        try { ctx.restore(); } catch (e) {}
+        gameState._errorCount = (gameState._errorCount || 0) + 1;
       }
 
-      // 2. RENDER PHASE
-      ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
-      
-      ctx.save();
-      // Apply translated camera context
-      camera.apply(ctx);
-
-      // Render Map infinite scrolling grid lines
-      drawMapGrid(ctx);
-      
-      // Render parallax background runes
-      drawBgRunes(ctx);
-
-      // Render Gems
-      gameState.gems.forEach(gem => gem.draw(ctx));
-
-      // Render player trail + body
-      gameState.player.draw(ctx);
-
-      // Render Enemies
-      gameState.enemies.forEach(enemy => enemy.draw(ctx));
-
-      // Render Projectiles
-      gameState.projectiles.forEach(proj => proj.draw(ctx));
-
-      // Render particles
-      gameState.particles.forEach(p => p.draw(ctx));
-
-      // Render float damage tags
-      gameState.floatingTexts.forEach(ft => ft.draw(ctx));
-
-      ctx.restore();
-
-      // Render minimap (independent of camera)
-      drawMinimap();
-
-      // Trigger next iteration
+      // Schedule next frame ALWAYS — even if errors happened, the loop must continue
       gameState.animationFrameId = requestAnimationFrame(gameLoop);
     }
 
