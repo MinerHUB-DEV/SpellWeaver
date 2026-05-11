@@ -4177,6 +4177,13 @@
       document.getElementById('hud-kills').textContent = gameState.kills;
       document.getElementById('hud-score').textContent = gameState.score.toLocaleString();
       document.getElementById('hud-wave').textContent = gameState.wave;
+      // Wave progress: how many of the quota have been killed
+      const wp = document.getElementById('hud-wave-progress');
+      if (wp) {
+        const killed = gameState.waveKilled || 0;
+        const quota = gameState.waveQuota || 0;
+        wp.textContent = `${killed}/${quota}`;
+      }
 
       // Hp elements
       const hpPct = Math.max(0, (p.hp / p.maxHp) * 100);
@@ -6897,6 +6904,11 @@
 
     // === KILL-BASED WAVE ADVANCE ===
     function advanceWave() {
+      // Guard against double-advance
+      if (gameState._advancingWave) return;
+      gameState._advancingWave = true;
+      setTimeout(() => { gameState._advancingWave = false; }, 100);
+
       gameState.wave++;
       // BP XP per wave cleared
       try { addBpXp(40, 'wave'); } catch (e) {}
@@ -6905,6 +6917,12 @@
       gameState.waveKilled = 0;
       gameState.waveSpawned = 0;
       gameState.waveQuota = getWaveQuota();
+      gameState._stuckFrames = 0;
+
+      // Wipe any remaining non-boss enemies from previous wave (visual cleanup)
+      const survivors = gameState.enemies.filter(e => !e.isBoss);
+      survivors.forEach(e => spawnParticles(e.x, e.y, e.color, 8, 3, 20, 2, true));
+      gameState.enemies = gameState.enemies.filter(e => e.isBoss);
 
       // Trigger 5-second wave break (no spawns during this window)
       gameState.waveBreakUntil = Date.now() + 5000;
@@ -7831,6 +7849,48 @@
           safeRun('bossHpBar', () => updateBossHpBar());
           safeRun('vignette', () => updateVignette());
           if (Math.random() < 0.05) safeRun('achievements', () => checkAchievements());
+
+          // === WAVE WATCHDOG (auto-recovers stuck waves) ===
+          safeRun('waveWatchdog', () => {
+            if (!gameState.player || gameState.finalWaveTriggered || gameState.victoryAchieved) return;
+            if (gameState.wave >= 50) return;
+            // Skip during break
+            if (gameState.waveBreakUntil && Date.now() < gameState.waveBreakUntil) return;
+
+            const aliveNonBoss = gameState.enemies.filter(e => !e.isBoss).length;
+            const quota = gameState.waveQuota || 0;
+            const spawned = gameState.waveSpawned || 0;
+
+            // CASE 1: Quota fully met AND no enemies alive → advance wave
+            if (spawned >= quota && aliveNonBoss === 0) {
+              advanceWave();
+              return;
+            }
+
+            // CASE 2: SAFETY NET — if quota was exceeded somehow, force advance
+            if (spawned > quota * 1.5) {
+              console.warn('🚨 Wave quota over-spawned — auto-advancing');
+              advanceWave();
+              return;
+            }
+
+            // CASE 3: SELF-HEAL — if we have remaining quota AND nothing has been
+            // spawned in 3+ seconds AND no enemies are alive (wipe glitch),
+            // reset the wave-break and force a spawn
+            const noneAlive = aliveNonBoss === 0;
+            const remaining = quota - spawned;
+            if (noneAlive && remaining > 0) {
+              gameState._stuckFrames = (gameState._stuckFrames || 0) + 1;
+              if (gameState._stuckFrames > 180) { // 3 seconds with nothing happening
+                console.warn('🚨 Wave appears stuck — force-spawning');
+                gameState.waveBreakUntil = 0; // clear any lingering break
+                spawnEnemyGroup(); // immediately spawn the next group
+                gameState._stuckFrames = 0;
+              }
+            } else {
+              gameState._stuckFrames = 0;
+            }
+          });
 
           // Target smooth follow player with slight lag dampening
           if (gameState.player) {
