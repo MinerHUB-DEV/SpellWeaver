@@ -1069,6 +1069,7 @@
               </div>
               <div class="glassmorphism px-3 py-1.5 rounded-full text-xs font-display flex items-center gap-1.5 border border-rose-500/30 bg-rose-950/30 text-rose-300 font-bold">
                 WAVE <span id="hud-wave">1</span>
+                <span class="text-[9px] text-rose-400/70 font-normal">(<span id="hud-wave-progress">0/0</span>)</span>
               </div>
             </div>
           </div>
@@ -4007,10 +4008,25 @@
         // Remove from list
         gameState.enemies = gameState.enemies.filter(e => e !== this);
         gameState.kills++;
+        // Track wave kill counter (only count non-boss kills toward wave completion)
+        if (!this.isBoss) gameState.waveKilled = (gameState.waveKilled || 0) + 1;
         // Battle Pass XP per kill (small per kill, big for boss)
         addBpXp(this.isBoss ? 25 : 1, 'kill');
         gameState.score += this.points;
         updateHUD();
+
+        // === CHECK FOR WAVE COMPLETION ===
+        // Wave is cleared when: full quota was spawned AND all spawned enemies are dead
+        const aliveNonBoss = gameState.enemies.filter(e => !e.isBoss).length;
+        if (
+          !gameState.waveBreakUntil &&
+          !gameState.finalWaveTriggered &&
+          gameState.wave < 50 &&
+          (gameState.waveSpawned || 0) >= (gameState.waveQuota || 0) &&
+          aliveNonBoss === 0
+        ) {
+          advanceWave();
+        }
       }
     }
 
@@ -6569,9 +6585,15 @@
       gameState.bossesSpawned = 0;
       gameState.bossesDefeated = 0;
       gameState._errorCount = 0; // reset auto-recovery error counter
+      gameState.waveKilled = 0;
+      gameState.waveSpawned = 0;
+      gameState.waveQuota = 0; // set immediately below
+      gameState.waveBreakUntil = 0;
 
       // Create new Player Mage
       gameState.player = new Player(0, 0, gameState.classSelected);
+      // Set initial quota for wave 1 (must come after wave is set to 1)
+      gameState.waveQuota = getWaveQuota();
       camera.x = -window.innerWidth / 2;
       camera.y = -window.innerHeight / 2;
 
@@ -6589,33 +6611,9 @@
         if (!gameState.paused) {
           gameState.time++;
           
-          // Wave trigger increments every 45 seconds (CAP at WAVE 50)
-          // HARDER: each wave lasts 75 seconds (was 45) — total run to wave 50: ~62 minutes
-          if (gameState.wave < 50 && gameState.time - gameState.lastWaveTime >= 75) {
-            gameState.wave++;
-            gameState.lastWaveTime = gameState.time;
-            spawnWaveBanner();
-            // Battle Pass XP per wave survived
-            addBpXp(40, 'wave');
-
-            // === 5-SECOND WAVE BREAK COOLDOWN ===
-            // Wipe ALL existing enemies + no new spawns during the 5s break
-            gameState.waveBreakUntil = Date.now() + 5000;
-            // Kill all current enemies dramatically (skip bosses — they're rare events)
-            const toWipe = gameState.enemies.filter(e => !e.isBoss);
-            toWipe.forEach(e => {
-              spawnParticles(e.x, e.y, e.color, 12, 4, 25, 3, true);
-            });
-            gameState.enemies = gameState.enemies.filter(e => e.isBoss);
-            camera.shakeIntensity = 12;
-            playSound('powerup');
-            showWaveBreakBanner(5);
-
-            // === FINAL WAVE: spawn 10 BOSSES ===
-            if (gameState.wave === 50) {
-              triggerFinalWave();
-            }
-          }
+          // === KILL-BASED WAVE SYSTEM ===
+          // Wave advances when ALL enemies in the quota are killed
+          // (logic is checked separately in the kill counter, not on a timer)
 
           // Periodically spawn custom special objects inside map
           if (gameState.time % 20 === 0) {
@@ -6628,10 +6626,8 @@
             gameState.gems.push(new Gem(px, py, reward));
           }
 
-          // Periodic boss summon every 90 seconds (NOT during final wave)
-          if (gameState.wave < 50 && gameState.time % 90 === 0 && gameState.time > 0) {
-            spawnBoss();
-          }
+          // Boss summons during waves are now triggered at wave milestones, not by time
+          // (handled in the kill-quota check below)
           
           // Detect VICTORY: final wave triggered AND no bosses remaining
           if (gameState.finalWaveTriggered && !gameState.victoryAchieved) {
@@ -6825,14 +6821,34 @@
 
     // --- ENTITY CREATORS / GENERATORS ---
 
+    // Quota-based wave system: how many enemies to spawn for the current wave
+    function getWaveQuota() {
+      // Wave 1 = 15, Wave 2 = 22, Wave 3 = 30 ... Wave 50 = ~370 enemies
+      return Math.floor(8 + gameState.wave * 7 + Math.pow(gameState.wave, 1.4));
+    }
+
+    // Cap how many enemies can be ON SCREEN at once (prevents lag spirals)
+    function getMaxAlive() {
+      return Math.min(80, 25 + gameState.wave * 2);
+    }
+
     function spawnEnemyGroup() {
       if (!gameState.player) return;
       // ⏸️ Don't spawn during wave break cooldown
       if (gameState.waveBreakUntil && Date.now() < gameState.waveBreakUntil) return;
+      // ⛔ Don't spawn during the final wave (only the 10 bosses count)
+      if (gameState.finalWaveTriggered) return;
+      // ⛔ Don't spawn if we've already hit the wave's quota — wait for kills to advance
+      if ((gameState.waveSpawned || 0) >= (gameState.waveQuota || 0)) return;
+      // ⛔ Don't exceed the on-screen cap (prevents lag from too many enemies)
+      const aliveNonBoss = gameState.enemies.filter(e => !e.isBoss).length;
+      if (aliveNonBoss >= getMaxAlive()) return;
 
-      // Select monster spawn coordinates radial outside player viewport bounds
-      // HARDER: more enemies per spawn group, scales much harder per wave
-      const spawnCount = Math.ceil(2 + (gameState.wave * 1.0) + (Math.random() * 3));
+      // How many to spawn this tick (small bursts) — but never exceed remaining quota or cap
+      const remaining = (gameState.waveQuota || 0) - (gameState.waveSpawned || 0);
+      const roomLeft = getMaxAlive() - aliveNonBoss;
+      const desired = Math.ceil(2 + (gameState.wave * 0.6) + (Math.random() * 2));
+      const spawnCount = Math.max(1, Math.min(desired, remaining, roomLeft));
       const p = gameState.player;
 
       // Select monster types pool based on current wave thresholds
@@ -6849,6 +6865,7 @@
 
         const choice = pool[Math.floor(Math.random() * pool.length)];
         gameState.enemies.push(new Enemy(ex, ey, choice));
+        gameState.waveSpawned = (gameState.waveSpawned || 0) + 1;
       }
     }
 
@@ -6876,6 +6893,39 @@
       gameState.activeBoss = boss;
       // Show the boss HP bar
       document.getElementById('boss-hp-container').classList.remove('hidden');
+    }
+
+    // === KILL-BASED WAVE ADVANCE ===
+    function advanceWave() {
+      gameState.wave++;
+      // BP XP per wave cleared
+      try { addBpXp(40, 'wave'); } catch (e) {}
+
+      // Reset wave kill tracking & set new quota
+      gameState.waveKilled = 0;
+      gameState.waveSpawned = 0;
+      gameState.waveQuota = getWaveQuota();
+
+      // Trigger 5-second wave break (no spawns during this window)
+      gameState.waveBreakUntil = Date.now() + 5000;
+
+      // Spawn boss every 5 waves (instead of every 90 seconds)
+      if (gameState.wave % 5 === 0 && gameState.wave < 50) {
+        // Spawn after the break ends so boss appears as the next wave starts
+        setTimeout(() => {
+          if (gameState.active && gameState.wave < 50) spawnBoss();
+        }, 5200);
+      }
+
+      camera.shakeIntensity = 12;
+      playSound('powerup');
+      spawnWaveBanner();
+      showWaveBreakBanner(5);
+
+      // Final wave at 50 — spawn 10 bosses
+      if (gameState.wave === 50) {
+        triggerFinalWave();
+      }
     }
 
     function spawnWaveBanner() {
