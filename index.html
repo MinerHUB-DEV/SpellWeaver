@@ -3338,16 +3338,44 @@
         // Apply XP bonus multiplier
         amount = Math.round(amount * (this.xpMult || 1));
         this.xp += amount;
-        this.totalXpEarned = (this.totalXpEarned || 0) + amount; // cumulative tracker
-        if (this.xp >= this.xpNeeded) {
+        this.totalXpEarned = (this.totalXpEarned || 0) + amount;
+
+        // Hard cap at level 50 to prevent math explosions
+        const MAX_LEVEL = 50;
+
+        // Handle MULTIPLE level-ups in one XP gain (was a single-shot if before)
+        let levelsGained = 0;
+        const MAX_LEVELS_PER_GAIN = 5; // safety guard against infinite loops
+
+        while (this.xp >= this.xpNeeded && this.level < MAX_LEVEL && levelsGained < MAX_LEVELS_PER_GAIN) {
           this.xp -= this.xpNeeded;
           this.level++;
           this.xpNeeded = Math.round(100 * Math.pow(this.level, 1.3));
-          
+          levelsGained++;
+          // Award BP XP per level
+          try { addBpXp(5, 'level-up'); } catch (e) { console.warn('BP XP error:', e); }
+        }
+
+        // If we hit the level cap, clamp XP
+        if (this.level >= MAX_LEVEL) {
+          this.xp = 0;
+          this.xpNeeded = 999999;
+        }
+
+        if (levelsGained > 0) {
           playSound('levelup');
-          triggerLevelUpScreen();
-          // Battle Pass XP for leveling up
-          addBpXp(5, 'level-up');
+          // Show level-up screen ONCE — pending levels will trigger more screens after each pick
+          this._pendingLevelUps = (this._pendingLevelUps || 0) + (levelsGained - 1);
+          try {
+            triggerLevelUpScreen();
+          } catch (err) {
+            console.error('❌ Level-up screen crashed:', err);
+            // Recover gracefully — unpause so the game doesn't lock up
+            gameState.paused = false;
+            const overlay = document.getElementById('screen-levelup');
+            if (overlay) overlay.classList.add('hidden');
+            gameState.floatingTexts.push(new FloatingText(this.x, this.y - 20, '⚠️ Level skipped (error)', '#ef4444', true));
+          }
         }
         updateHUD();
       }
@@ -7012,27 +7040,31 @@
       // Create a pool of upgrade elements
       const choices = buildUpgradePool(p);
 
-      // Pull 3 unique random options from the pool
       // === WEIGHTED RARITY DRAFT ===
-      // Common upgrades show up frequently; Epic = harder; Legendary = very rare
       const rarityWeights = { Common: 60, Rare: 25, Epic: 10, Legendary: 3 };
       const selectedChoices = [];
 
       function weightedPick(pool) {
-        // Sum total weights of all candidates
+        if (!pool || pool.length === 0) return -1;
+        if (pool.length === 1) return 0;
         let total = 0;
-        pool.forEach(c => { total += (rarityWeights[c.rarity] || 30); });
+        pool.forEach(c => { total += (rarityWeights[c && c.rarity] || 30); });
+        if (total <= 0) return Math.floor(Math.random() * pool.length);
         let roll = Math.random() * total;
         for (let i = 0; i < pool.length; i++) {
-          const w = rarityWeights[pool[i].rarity] || 30;
+          const w = rarityWeights[pool[i] && pool[i].rarity] || 30;
           if (roll < w) return i;
           roll -= w;
         }
         return pool.length - 1;
       }
 
-      while (selectedChoices.length < 3 && choices.length > 0) {
+      // Safety: hard-cap loop iterations so we never infinite-loop
+      let pickGuard = 0;
+      while (selectedChoices.length < 3 && choices.length > 0 && pickGuard < 50) {
+        pickGuard++;
         const idx = weightedPick(choices);
+        if (idx < 0) break;
         selectedChoices.push(choices.splice(idx, 1)[0]);
       }
 
@@ -7089,9 +7121,24 @@
 
         // Selection click listeners
         card.addEventListener('click', () => {
-          applyUpgrade(choice);
+          try {
+            applyUpgrade(choice);
+          } catch (err) {
+            console.error('❌ applyUpgrade crashed:', err, choice);
+          }
           document.getElementById('screen-levelup').classList.add('hidden');
           gameState.paused = false;
+
+          // If multi-level-up happened, queue another upgrade screen
+          if (gameState.player && gameState.player._pendingLevelUps > 0) {
+            gameState.player._pendingLevelUps--;
+            setTimeout(() => {
+              try { triggerLevelUpScreen(); } catch (e) {
+                console.error('Pending level-up failed:', e);
+                gameState.paused = false;
+              }
+            }, 250);
+          }
         });
 
         container.appendChild(card);
