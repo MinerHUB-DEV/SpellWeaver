@@ -388,7 +388,8 @@
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
       overflow: hidden;
-      background-color: #05050f;
+      /* 🍩 SEASON 2 SPRINGFIELD: yellow → blue gradient with clouds */
+      background: linear-gradient(180deg, #fde047 0%, #fbbf24 25%, #fcd34d 45%, #93c5fd 70%, #60a5fa 100%);
     }
     .font-display {
       font-family: 'Orbitron', sans-serif;
@@ -813,58 +814,139 @@
     .bp-title-unequip:hover {
       background: rgba(239, 68, 68, 0.3);
     }
+    /* === SEASON 2: SIMPSONS THEME === */
+    @keyframes simpsonsPulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(250, 204, 21, 0.5); }
+      50% { box-shadow: 0 0 35px rgba(250, 204, 21, 0.85), 0 0 50px rgba(251, 146, 60, 0.4); }
+    }
+    .simpsons-pulse {
+      animation: simpsonsPulse 2s infinite ease-in-out;
+    }
+    @keyframes cloudFloat {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(20px); }
+    }
+    @keyframes donutSpin {
+      0% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(180deg) scale(1.15); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+    .donut-spin {
+      animation: donutSpin 3s infinite ease-in-out;
+      display: inline-block;
+    }
+    @keyframes simpsonsBgScroll {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 200% 0%; }
+    }
+    .simpsons-sky {
+      background: linear-gradient(180deg, #fbbf24 0%, #fde68a 30%, #93c5fd 60%, #60a5fa 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    .simpsons-sky::before {
+      content: '☁️ ☁️ ☁️ ☁️ ☁️ ☁️ ☁️ ☁️ ☁️ ☁️';
+      position: absolute;
+      top: 25%;
+      left: -100%;
+      right: -100%;
+      font-size: 32px;
+      letter-spacing: 60px;
+      white-space: nowrap;
+      opacity: 0.7;
+      animation: cloudFloat 15s infinite ease-in-out;
+    }
+    .simpsons-sky::after {
+      content: '🍩 🍩 🍩 🍩 🍩 🍩';
+      position: absolute;
+      top: 60%;
+      left: -50%;
+      right: -50%;
+      font-size: 24px;
+      letter-spacing: 80px;
+      white-space: nowrap;
+      opacity: 0.5;
+      animation: cloudFloat 20s infinite ease-in-out reverse;
+    }
+    .simpsons-card {
+      background: linear-gradient(135deg, rgba(254, 240, 138, 0.95), rgba(253, 224, 71, 0.95));
+      border: 3px solid #f59e0b;
+      color: #422006;
+      box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+      transition: all 0.2s;
+    }
+    .simpsons-card:hover {
+      transform: translateY(-3px) scale(1.02);
+      box-shadow: 0 8px 30px rgba(245, 158, 11, 0.6);
+      border-color: #ec4899;
+    }
+    .simpsons-card-locked {
+      background: linear-gradient(135deg, rgba(254, 240, 138, 0.4), rgba(253, 224, 71, 0.4));
+      border: 3px dashed rgba(245, 158, 11, 0.5);
+      color: #57534e;
+      filter: grayscale(0.4);
+    }
+    .simpsons-title-glow {
+      text-shadow:
+        0 0 10px rgba(250, 204, 21, 0.8),
+        2px 2px 0 #f97316,
+        4px 4px 0 #ea580c,
+        6px 6px 12px rgba(0, 0, 0, 0.3);
+    }
+    @keyframes donutBounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-15px); }
+    }
+    .donut-bounce {
+      animation: donutBounce 2s infinite ease-in-out;
+    }
   </style>
 </head>
 <body class="text-slate-100 select-none overflow-hidden w-screen h-screen">
 
   <!-- ================= BACKGROUND ANIMATED CANVAS ================= -->
-  <canvas id="menu-bg-canvas" class="absolute inset-0 z-0 pointer-events-none opacity-40"></canvas>
+  <canvas id="menu-bg-canvas" class="fixed inset-0 z-0 pointer-events-none w-screen h-screen"></canvas>
 
   <!-- ================= GAME UI CONTAINER ================= -->
-  <div id="game-container" class="relative w-full h-full flex flex-col items-center justify-center z-10">
+  <div id="game-container" class="relative w-full h-full flex flex-col items-center justify-center z-[10]">
     
     <!-- 1. MAIN TITLE / PLAY SCREEN -->
-    <div id="screen-menu" class="w-full max-w-4xl px-4 flex flex-col justify-between h-full py-8 md:py-12 relative z-10">
+    <div id="screen-menu" class="w-full max-w-6xl px-4 flex flex-col justify-between h-full py-4 md:py-6 relative z-20 pointer-events-auto overflow-y-auto">
       <!-- Top Bar: Settings / Achievements Quick Links -->
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-2">
-          <span class="text-purple-400 font-display font-bold tracking-wider text-sm bg-purple-950/40 px-3 py-1.5 rounded-full border border-purple-800/30">
-            ✨ WEB AUDIO SYNTH ACTIVE
-          </span>
-        </div>
-        <div class="flex gap-3 flex-wrap items-center">
-          <!-- Season Countdown Banner -->
-          <div id="season-banner" class="px-3 py-2 rounded-lg text-xs font-display font-bold flex items-center gap-2 bg-gradient-to-r from-amber-600/30 via-orange-500/30 to-red-500/30 border-2 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.25)] animate-pulse">
-            <span class="text-base">⚡</span>
-            <div class="flex flex-col leading-tight">
-              <span class="text-[9px] text-amber-300 tracking-widest uppercase">Season 1 Ends</span>
-              <span id="season-countdown" class="text-amber-100 text-sm font-extrabold tracking-wider">30d 00h</span>
-            </div>
+      <div class="w-full flex flex-col md:flex-row justify-between items-center gap-3">
+        <div id="season-banner" class="w-full md:w-auto flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-yellow-400/20 via-orange-500/20 to-blue-500/20 border-2 border-yellow-300/50 shadow-[0_0_25px_rgba(250,204,21,0.22)]">
+          <div class="w-11 h-11 rounded-xl bg-yellow-300 text-slate-950 flex items-center justify-center font-display font-black shadow-[0_0_18px_rgba(250,204,21,0.45)]">S2</div>
+          <div class="leading-tight text-left">
+            <div class="font-display text-[10px] tracking-[0.28em] text-yellow-200 uppercase">Springfield Chaos</div>
+            <div class="font-display font-extrabold text-sm text-white">Season ends in <span id="season-countdown" class="text-yellow-200">10d 00h</span></div>
           </div>
-          <button id="btn-leaderboard" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
+        </div>
+        <div class="w-full md:w-auto flex gap-2 flex-wrap justify-center md:justify-end items-center rounded-2xl p-2 bg-slate-950/55 border border-white/10 backdrop-blur-md shadow-[0_0_24px_rgba(15,23,42,0.35)]">
+          <button id="btn-leaderboard" class="bg-slate-950/70 hover:bg-yellow-500/20 border border-yellow-400/30 hover:border-yellow-300/70 px-3 py-2 rounded-xl text-sm font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-sm">
             🏆 Leaderboard
           </button>
-          <button id="btn-battlepass" class="px-3 py-2 rounded-lg text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-amber-500/30 via-yellow-500/30 to-orange-500/30 border-2 border-amber-400/60 text-amber-200 hover:scale-105 shadow-[0_0_15px_rgba(245,158,11,0.25)]">
+          <button id="btn-battlepass" class="px-3 py-2 rounded-xl text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-amber-500/35 via-yellow-500/35 to-orange-500/35 border-2 border-amber-400/70 text-amber-100 hover:scale-105 shadow-[0_0_15px_rgba(245,158,11,0.25)]">
             🎟️ Battle Pass <span id="bp-tier-badge" class="text-[9px] bg-amber-600/50 px-1.5 py-0.5 rounded font-display">T1</span>
           </button>
-          <button id="btn-titles" class="px-3 py-2 rounded-lg text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-purple-500/30 to-indigo-500/30 border-2 border-purple-400/60 text-purple-200 hover:scale-105 shadow-[0_0_15px_rgba(168,85,247,0.25)]">
+          <button id="btn-titles" class="px-3 py-2 rounded-xl text-sm font-bold transition cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-purple-500/30 to-indigo-500/30 border-2 border-purple-400/60 text-purple-100 hover:scale-105 shadow-[0_0_15px_rgba(168,85,247,0.25)]">
             🎖️ Titles <span id="titles-count-badge" class="text-[9px] bg-purple-600/50 px-1.5 py-0.5 rounded font-display">0</span>
           </button>
-          <button id="btn-menu-admin" class="hidden glassmorphism hover:bg-rose-900/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer items-center gap-1.5 border border-rose-500/40 bg-rose-950/30 text-rose-300">
+
+          <button id="btn-menu-admin" class="hidden hover:bg-rose-900/40 px-3 py-2 rounded-xl text-sm font-semibold transition cursor-pointer items-center gap-1.5 border border-rose-500/40 bg-rose-950/30 text-rose-300">
             👑 Admin
           </button>
-          <button id="btn-how-to" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
+          <button id="btn-how-to" class="bg-slate-950/70 hover:bg-cyan-500/20 border border-cyan-400/20 hover:border-cyan-300/60 px-3 py-2 rounded-xl text-sm font-semibold transition cursor-pointer flex items-center gap-1.5">
             📖 How To Play
           </button>
-          <button id="btn-settings-menu" class="glassmorphism hover:bg-slate-800/40 px-3 py-2 rounded-lg text-sm transition cursor-pointer">
+          <button id="btn-settings-menu" class="bg-slate-950/70 hover:bg-slate-800/70 border border-white/10 px-3 py-2 rounded-xl text-sm transition cursor-pointer">
             ⚙️ Settings
           </button>
         </div>
       </div>
 
       <!-- Hero Title -->
-      <div class="text-center my-auto flex flex-col items-center justify-center">
-        <h1 class="shimmer-text font-fantasy text-4xl sm:text-6xl md:text-8xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-pink-400 via-purple-400 to-cyan-400 drop-shadow-[0_4px_20px_rgba(168,85,247,0.5)] animate-float">
+      <div class="text-center my-auto flex flex-col items-center justify-center py-4">
+        <h1 class="shimmer-text font-fantasy text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-pink-400 via-purple-400 to-cyan-400 drop-shadow-[0_4px_20px_rgba(168,85,247,0.5)] animate-float leading-none">
           SPELLWEAVER
         </h1>
         <p class="font-display text-sm sm:text-lg text-purple-200 tracking-widest mt-2 uppercase">
@@ -875,8 +957,8 @@
         </p>
 
         <!-- CLASS SELECTION BOX -->
-        <div class="mt-8 w-full max-w-5xl">
-          <h3 class="font-display text-xs text-slate-400 tracking-widest uppercase mb-4 text-center">Choose Your Class</h3>
+        <div class="mt-5 w-full max-w-5xl">
+          <h3 class="font-display text-xs text-slate-400 tracking-widest uppercase mb-3 text-center">Choose Your Class</h3>
           <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             
             <!-- Pyromancer -->
@@ -967,7 +1049,7 @@
           </div>
         </div>
 
-        <button id="btn-start-game" class="mt-8 px-10 py-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 text-white font-display font-black text-lg tracking-widest rounded-xl hover:scale-105 transition active:scale-95 glow-storm cursor-pointer flex items-center gap-3">
+        <button id="btn-start-game" class="mt-5 px-10 py-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 text-white font-display font-black text-lg tracking-widest rounded-xl hover:scale-105 transition active:scale-95 glow-storm cursor-pointer flex items-center gap-3">
           🔮 START ADVENTURE
         </button>
       </div>
@@ -1009,7 +1091,7 @@
       <div id="boss-hp-container" class="hidden">
         <div class="text-center mb-1 flex items-center justify-center gap-2">
           <span class="text-rose-500 text-lg">👁️</span>
-          <span id="boss-name" class="font-fantasy font-extrabold text-rose-300 text-sm tracking-widest uppercase drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]">THE ABYSSAL REAPER</span>
+          <span id="boss-name" class="font-fantasy font-extrabold text-rose-300 text-sm tracking-widest uppercase drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]">HOMER SIMPSON</span>
           <span class="text-rose-500 text-lg">👁️</span>
         </div>
         <div class="h-3 bg-slate-950/80 border border-rose-900/60 rounded-full overflow-hidden p-[2px] shadow-[0_0_20px_rgba(239,68,68,0.4)]">
@@ -1080,7 +1162,7 @@
           <span class="text-xl">⚠️</span>
           <div>
             <p class="font-display font-extrabold text-sm tracking-widest text-red-400">WARNING: ELITE BOSS INCOMING</p>
-            <p class="text-[10px] text-slate-300">The Abyssal Reaper has spawned! Defeat it to survive!</p>
+            <p class="text-[10px] text-slate-300">Homer Simpson has spawned! D'oh! Defeat him to survive!</p>
           </div>
         </div>
 
@@ -1282,6 +1364,186 @@
       </div>
     </div>
 
+    <!-- (Season 2 preview modal removed — Season 2 is now LIVE!) -->
+    <div id="modal-season2-removed" class="hidden">
+      <div class="relative z-10 max-w-5xl mx-auto p-3 md:p-6 flex flex-col gap-4 min-h-full">
+        <!-- Header -->
+        <div class="flex justify-between items-start">
+          <div class="flex items-center gap-3 bg-yellow-300/90 border-4 border-amber-600 rounded-2xl px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.3)]">
+            <span class="text-5xl donut-spin">🍩</span>
+            <div>
+              <div class="font-display text-[10px] tracking-[0.3em] text-amber-900 font-extrabold">SEASON 2 PREVIEW</div>
+              <h2 class="font-fantasy text-3xl md:text-4xl font-black text-amber-900 simpsons-title-glow leading-none">
+                SPRINGFIELD CHAOS
+              </h2>
+              <div class="text-[10px] text-amber-900/80 font-display tracking-wider mt-1">A Simpsons-themed adventure 🍩 D'oh!</div>
+            </div>
+          </div>
+          <button id="btn-close-season2" class="bg-rose-500 hover:bg-rose-600 border-4 border-rose-700 px-4 py-2 rounded-xl text-base font-display font-extrabold text-white transition cursor-pointer shadow-lg">✕</button>
+        </div>
+
+        <!-- Countdown banner -->
+        <div class="bg-amber-950/90 border-4 border-yellow-400 rounded-2xl p-4 text-center shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+          <div class="text-yellow-300 font-display text-xs tracking-widest uppercase mb-1">🎉 LAUNCHING IN</div>
+          <div id="season2-countdown" class="font-fantasy text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-300 to-rose-300 simpsons-title-glow">
+            10d 00h
+          </div>
+          <div class="text-yellow-200/80 text-[11px] font-display mt-1">When Season 1 ends, Springfield arrives!</div>
+        </div>
+
+        <!-- What's Coming Grid -->
+        <div class="bg-yellow-100/95 border-4 border-amber-700 rounded-2xl p-4 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+          <h3 class="font-fantasy font-extrabold text-2xl text-amber-900 mb-1 text-center">🌟 NEW IN SEASON 2 🌟</h3>
+          <p class="text-center text-amber-800 text-xs mb-4 font-display">All this content drops the moment Season 1 ends!</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+
+            <!-- New Class: Bart -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce">🛹</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Bart Skater</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">New Class</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Eat my shorts! Skateboards through enemies dealing damage. Starts with the Slingshot spell.</p>
+            </div>
+
+            <!-- New Class: Lisa -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:0.3s">🎷</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Lisa Saxophone</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">New Class</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Sonic blasts from her sax stun enemies. +50% XP gain — the smart pick.</p>
+            </div>
+
+            <!-- New Class: Homer -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:0.6s">🍩</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Homer Donut</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">New Class</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Mmm... donuts. Massive HP pool, throws donut projectiles. Slow but TANKY.</p>
+            </div>
+
+            <!-- Donut Pickup -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-spin">🍩</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Donut Pickups</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">New Item</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Heals 50% HP + grants temporary +25% damage. Replaces some hearts.</p>
+            </div>
+
+            <!-- Duff Beer -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:0.4s">🍺</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Duff Beer Boost</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">New Item</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">+50% movement speed for 10 seconds. Your screen wobbles slightly! 🍻</p>
+            </div>
+
+            <!-- Final Boss -->
+            <div class="simpsons-card rounded-xl p-3 border-rose-500">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:0.5s">👴</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Mr. Burns Boss</div>
+                  <div class="text-[10px] text-rose-700 font-display uppercase tracking-widest">⚠ Final Boss ⚠</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Ex-cellent! Replaces the Abyssal Reaper. Fires hounds of doom at you. "Release the hounds!"</p>
+            </div>
+
+            <!-- Sideshow Bob -->
+            <div class="simpsons-card rounded-xl p-3 border-rose-500">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:0.7s">🦰</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Sideshow Bob</div>
+                  <div class="text-[10px] text-rose-700 font-display uppercase tracking-widest">Mid-Boss</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">A new mid-game boss with rakes that summon clones. Steps on his own rakes for damage!</p>
+            </div>
+
+            <!-- Springfield Map -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:0.9s">🏭</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">Springfield Map</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">New Background</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Yellow sky, nuclear power plant in the distance, floating clouds. Pure Simpsons vibes.</p>
+            </div>
+
+            <!-- New Battle Pass -->
+            <div class="simpsons-card rounded-xl p-3">
+              <div class="flex items-start gap-2">
+                <span class="text-3xl donut-bounce" style="animation-delay:1.1s">🎟️</span>
+                <div class="flex-1">
+                  <div class="font-display font-extrabold text-base">New Battle Pass</div>
+                  <div class="text-[10px] text-amber-700 font-display uppercase tracking-widest">50 Springfield Tiers</div>
+                </div>
+              </div>
+              <p class="text-[11px] mt-2">Earn donuts, Krusty Burgers, Duff cans, and exclusive Simpsons titles!</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sneak Peek Titles -->
+        <div class="bg-pink-100/95 border-4 border-pink-500 rounded-2xl p-4 shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
+          <h3 class="font-fantasy font-extrabold text-xl text-pink-900 mb-2 text-center">🎖️ EXCLUSIVE SIMPSONS TITLES 🎖️</h3>
+          <p class="text-center text-pink-800 text-xs mb-3 font-display">Only earnable during Season 2 — collect them all before they're gone forever!</p>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div class="simpsons-card-locked rounded-lg p-3 text-center">
+              <div class="text-2xl mb-1">🍩</div>
+              <div class="font-display font-extrabold text-xs">D'oh-Master</div>
+              <div class="text-[9px] uppercase tracking-widest mt-1">🔒 Tier 5</div>
+            </div>
+            <div class="simpsons-card-locked rounded-lg p-3 text-center">
+              <div class="text-2xl mb-1">🛹</div>
+              <div class="font-display font-extrabold text-xs">Cowabunga</div>
+              <div class="text-[9px] uppercase tracking-widest mt-1">🔒 Tier 15</div>
+            </div>
+            <div class="simpsons-card-locked rounded-lg p-3 text-center">
+              <div class="text-2xl mb-1">🎷</div>
+              <div class="font-display font-extrabold text-xs">Saxophonist</div>
+              <div class="text-[9px] uppercase tracking-widest mt-1">🔒 Tier 30</div>
+            </div>
+            <div class="simpsons-card-locked rounded-lg p-3 text-center">
+              <div class="text-2xl mb-1">⚛️</div>
+              <div class="font-display font-extrabold text-xs">Nuclear King</div>
+              <div class="text-[9px] uppercase tracking-widest mt-1">🔒 Tier 50</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-blue-300/90 border-4 border-blue-600 rounded-2xl p-3 text-center text-blue-950 font-display">
+          <div class="font-extrabold text-sm">🎉 GET HYPED! 🎉</div>
+          <div class="text-[11px] mt-1">Season 2 launches automatically when Season 1 ends. Your titles, achievements, and stats all carry over!</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 12. BATTLE PASS MODAL -->
     <div id="modal-battlepass" class="hidden absolute inset-0 bg-slate-950/95 backdrop-blur-md z-[55] p-3 md:p-6 overflow-y-auto">
       <div class="max-w-5xl mx-auto flex flex-col gap-3">
@@ -1290,7 +1552,7 @@
           <div class="flex items-center gap-3">
             <span class="text-3xl">🎟️</span>
             <div>
-              <h2 class="font-fantasy font-extrabold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-200 to-orange-300">SEASON 1 BATTLE PASS</h2>
+              <h2 class="font-fantasy font-extrabold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-200 to-orange-300">🍩 SEASON 2: SPRINGFIELD 🍩</h2>
               <p class="text-[11px] text-amber-200/70 font-display tracking-wider">Earn rewards as you play • 100% FREE</p>
             </div>
           </div>
@@ -1423,6 +1685,44 @@
             <button class="admin-btn" data-action="boost-leaderboard">🏆 Boost My Leaderboard</button>
             <button class="admin-btn" data-action="reset-ach">🔄 Reset Achievements</button>
             <button class="admin-btn" data-action="reset-season">📅 Reset Season + LB Timer</button>
+          </div>
+        </div>
+
+        <!-- 🎬 LIVE EVENT BROADCAST -->
+        <div class="bg-gradient-to-br from-yellow-950/40 via-orange-950/30 to-rose-950/30 border-2 border-yellow-500/50 rounded-xl p-4 shadow-[0_0_30px_rgba(250,204,21,0.15)]">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-3 h-3 bg-yellow-400 rounded-full animate-pulse shadow-[0_0_12px_rgba(250,204,21,0.8)]"></div>
+            <p class="font-display text-xs uppercase tracking-[0.25em] text-yellow-300 font-extrabold">🎬 LIVE EVENT BROADCAST</p>
+          </div>
+          <p class="text-[10px] text-yellow-200/70 mb-3">Launch a global live event that every active player sees instantly. Triggers a dramatic fullscreen transition with effects.</p>
+
+          <!-- Event Type Selector -->
+          <div class="mb-3">
+            <label class="text-[10px] font-display text-slate-400 uppercase tracking-wider block mb-1">Event Type</label>
+            <select id="live-event-type" class="w-full bg-slate-950/80 text-yellow-200 text-xs border-2 border-yellow-600/40 rounded-lg px-3 py-2.5 font-display font-bold outline-none focus:border-yellow-400 transition">
+              <option value="season2-launch">🍩 Season 2: Springfield Chaos Launch</option>
+              <option value="double-xp">⚡ Double XP Weekend</option>
+              <option value="boss-rush">👁️ Boss Rush — 5 Bosses Now!</option>
+              <option value="donut-rain">🍩 Mega Donut Rain</option>
+              <option value="nuclear-meltdown">☢️ Nuclear Meltdown — Screen Shake</option>
+              <option value="custom-msg">💬 Custom Announcement</option>
+            </select>
+          </div>
+
+          <!-- Custom message input (only for custom-msg) -->
+          <div id="live-event-msg-wrap" class="hidden mb-3">
+            <label class="text-[10px] font-display text-slate-400 uppercase tracking-wider block mb-1">Custom Message</label>
+            <input id="live-event-msg" type="text" maxlength="80" placeholder="Type your announcement..." class="w-full bg-slate-950/80 text-amber-200 text-xs border border-amber-600/40 rounded-lg px-3 py-2 font-display outline-none focus:border-amber-400 transition placeholder:text-slate-600" />
+          </div>
+
+          <!-- Launch Button -->
+          <button id="btn-live-event" class="w-full py-3.5 bg-gradient-to-r from-yellow-500 via-orange-500 to-rose-500 hover:from-yellow-400 hover:via-orange-400 hover:to-rose-400 text-white font-display font-black tracking-[0.2em] text-sm rounded-xl cursor-pointer shadow-[0_4px_25px_rgba(245,158,11,0.4)] hover:shadow-[0_4px_35px_rgba(245,158,11,0.6)] transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2">
+            🚀 BROADCAST LIVE EVENT
+          </button>
+
+          <!-- Event Status -->
+          <div id="live-event-status" class="hidden mt-2 text-center text-[10px] font-display py-2 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-300">
+            ✅ Event broadcasted successfully!
           </div>
         </div>
 
@@ -1820,7 +2120,7 @@
           VICTORY!
         </h2>
         <p class="text-amber-200 text-sm mt-2 font-display tracking-widest">YOU HAVE BECOME THE GRAND ARCH-MAGE</p>
-        <p class="text-slate-300 text-xs sm:text-sm mt-3 max-w-sm mx-auto">You vanquished the 10 Abyssal Reapers and conquered all 50 waves of the eternal storm. Your name shall echo in the Grimoire forever.</p>
+        <p class="text-slate-300 text-xs sm:text-sm mt-3 max-w-sm mx-auto">You defeated Krusty the Clown and conquered all 50 waves of Springfield Chaos! D'oh! Your name shall echo in the Grimoire forever. 🍩</p>
       </div>
 
       <div class="glassmorphism w-full max-w-xl p-6 rounded-2xl border border-amber-500/30 mb-6 flex flex-col gap-4 shadow-[0_0_50px_rgba(245,158,11,0.15)]">
@@ -2237,6 +2537,7 @@
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
+      context.setTransform(1, 0, 0, 1, 0, 0);
       context.scale(dpr, dpr);
     }
 
@@ -2707,6 +3008,7 @@
 
         // Damage flash effect
         this.damageFlash = 0;
+        this.spawnInvincible = 3000;
       }
 
       tryDash() {
@@ -2747,6 +3049,12 @@
       }
 
       update() {
+        // Spawn protection
+        if (this.spawnInvincible > 0) {
+          this.spawnInvincible -= 1000/60;
+          if (Math.floor(this.spawnInvincible / 500) % 2 === 0) gameState.floatingTexts.push(new FloatingText(this.x, this.y-40, '🛡️ SPAWN PROTECT', '#10b981', false));
+        }
+
         // Tick down cooldowns
         if (this.dashCooldown > 0) this.dashCooldown -= 16.67; // ~1 frame at 60fps
         if (this.invincible > 0) this.invincible--;
@@ -2952,18 +3260,30 @@
         ctx.fillStyle = '#0f172a';
         ctx.fill();
         
+        // Outer white ring so player is always visible against bright bg
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 5;
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+        // Coloured inner ring
         ctx.strokeStyle = renderColor;
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        // Neon Core
+        // Neon Core — bigger shadow for visibility on yellow bg
         if (gameState.graphicsQuality !== 'low') {
-          ctx.shadowBlur = 15;
+          ctx.shadowBlur = 30;
           ctx.shadowColor = renderColor;
         }
         ctx.fillStyle = renderColor;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius - 8, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.radius - 7, 0, Math.PI * 2);
+        ctx.fill();
+        // Bright white inner dot — very visible
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius - 13, 0, Math.PI * 2);
         ctx.fill();
 
         // Facing direction indicator (a small triangle/wand)
@@ -3282,6 +3602,8 @@
       }
 
       takeDamage(amount) {
+        // Spawn protection
+        if (this.spawnInvincible > 0) return;
         // Invincible during dash i-frames
         if (this.invincible > 0) return;
 
@@ -3641,15 +3963,26 @@
             this.lastShot = Date.now() + Math.random() * 2000;
             break;
           case 'boss':
-            this.radius = 35;
-            this.speed = 1.3;
-            // HARDER: bosses much tougher, scales 70% per wave (was 40%)
+            this.radius = 38;
+            this.speed = 1.2;
             this.hp = 1500 * (1 + (gameState.wave - 1) * 0.7);
-            this.color = '#ec4899'; // Abyssal pink boss
+            this.color = '#fde047'; // Homer yellow
             this.points = 500;
             this.isShooter = true;
             this.lastShot = Date.now();
             this.isBoss = true;
+            this.isHomer = true;
+            break;
+          case 'krusty':
+            this.radius = 55;
+            this.speed = 1.0;
+            this.hp = 25000;
+            this.color = '#22c55e'; // Krusty green hair
+            this.points = 5000;
+            this.isShooter = true;
+            this.lastShot = Date.now();
+            this.isBoss = true;
+            this.isKrusty = true;
             break;
         }
 
@@ -3760,19 +4093,84 @@
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 5;
           ctx.stroke();
-          
-          // Draw glowing crown above Boss head
-          ctx.fillStyle = '#facc15';
-          ctx.beginPath();
-          ctx.moveTo(this.x - 15, this.y - 45);
-          ctx.lineTo(this.x - 7, this.y - 38);
-          ctx.lineTo(this.x, this.y - 50);
-          ctx.lineTo(this.x + 7, this.y - 38);
-          ctx.lineTo(this.x + 15, this.y - 45);
-          ctx.lineTo(this.x + 10, this.y - 30);
-          ctx.lineTo(this.x - 10, this.y - 30);
-          ctx.closePath();
-          ctx.fill();
+
+          if (this.isKrusty) {
+            // === KRUSTY THE CLOWN BOSS ===
+            // Big green afro hair
+            ctx.fillStyle = '#22c55e';
+            for (let i = 0; i < 12; i++) {
+              const a = (i / 12) * Math.PI * 2;
+              ctx.beginPath();
+              ctx.arc(this.x + Math.cos(a) * (this.radius + 8), this.y - 10 + Math.sin(a) * (this.radius + 5), 14, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            // Big red nose
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y - 5, 10, 0, Math.PI * 2);
+            ctx.fill();
+            // White face paint
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y - 2, this.radius * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+            // Big red clown smile
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y + 2, 18, 0.2, Math.PI - 0.2);
+            ctx.stroke();
+            // "HEY HEY!" label
+            ctx.fillStyle = '#facc15';
+            ctx.font = "bold 11px 'Orbitron', sans-serif";
+            ctx.textAlign = 'center';
+            ctx.fillText('🤡 KRUSTY', this.x, this.y - this.radius - 20);
+          } else if (this.isHomer) {
+            // === HOMER SIMPSON BOSS ===
+            // Bald head bump
+            ctx.fillStyle = '#fde047';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y - this.radius * 0.3, this.radius * 0.85, 0, Math.PI * 2);
+            ctx.fill();
+            // Two hairs on top
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2.5;
+            for (let i = -1; i <= 1; i += 2) {
+              ctx.beginPath();
+              ctx.moveTo(this.x + i * 5, this.y - this.radius - 5);
+              ctx.quadraticCurveTo(this.x + i * 8, this.y - this.radius - 18, this.x + i * 3, this.y - this.radius - 22);
+              ctx.stroke();
+            }
+            // 5 o'clock shadow
+            ctx.fillStyle = '#a3a3a3';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y + 8, 12, 0, Math.PI * 2);
+            ctx.fill();
+            // Big mouth
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y + 6, 10, 0.1, Math.PI - 0.1);
+            ctx.stroke();
+            // "D'OH!" label
+            ctx.fillStyle = '#f97316';
+            ctx.font = "bold 10px 'Orbitron', sans-serif";
+            ctx.textAlign = 'center';
+            ctx.fillText("D'OH!", this.x, this.y - this.radius - 12);
+          } else {
+            // Generic boss crown (fallback)
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.moveTo(this.x - 15, this.y - 45);
+            ctx.lineTo(this.x - 7, this.y - 38);
+            ctx.lineTo(this.x, this.y - 50);
+            ctx.lineTo(this.x + 7, this.y - 38);
+            ctx.lineTo(this.x + 15, this.y - 45);
+            ctx.lineTo(this.x + 10, this.y - 30);
+            ctx.lineTo(this.x - 10, this.y - 30);
+            ctx.closePath();
+            ctx.fill();
+          }
         }
 
         // Monster eye
@@ -4597,14 +4995,17 @@
       const tiers = [];
       for (let i = 1; i <= BP_MAX_TIER; i++) {
         let reward;
-        if (i === 50) reward = { type: 'title', name: 'Champion Title', icon: '👑', value: 'Grand Champion', rarity: 'legendary', desc: 'Unlock the legendary "Grand Champion" title' };
+        // 🍩 SEASON 2 SPRINGFIELD title rewards
+        if (i === 50) reward = { type: 'title', name: 'Nuclear King Title', icon: '⚛️', value: 'Nuclear King', rarity: 'legendary', desc: 'Unlock the legendary "Nuclear King" title — Excellent.' };
+        else if (i === 40) reward = { type: 'title', name: 'Krusty Burger King', icon: '🍔', value: 'Krusty Burger King', rarity: 'epic', desc: 'Hey hey, kids! Greasiest title in Springfield.' };
+        else if (i === 30) reward = { type: 'title', name: 'Saxophonist Title', icon: '🎷', value: 'Saxophonist', rarity: 'epic', desc: 'Smooth jazz mastery — Lisa would be proud.' };
         else if (i === 25) reward = { type: 'damage', name: '+50% Damage Buff', icon: '💥', value: 0.5, rarity: 'legendary', desc: 'Permanent +50% spell damage' };
-        else if (i === 40) reward = { type: 'cooldown', name: '-25% Cooldown', icon: '⏳', value: 0.25, rarity: 'legendary', desc: 'Permanent -25% spell cooldown' };
-        else if (i === 30) reward = { type: 'title', name: 'Veteran Title', icon: '🎖️', value: 'Veteran Mage', rarity: 'epic', desc: 'Unlock "Veteran Mage" title' };
         else if (i === 20) reward = { type: 'speed', name: '+15% Speed Buff', icon: '⚡', value: 0.15, rarity: 'epic', desc: 'Permanent +15% movement speed' };
-        else if (i === 15) reward = { type: 'magnet', name: '+50 Magnet Range', icon: '🧲', value: 50, rarity: 'epic', desc: 'Permanent +50 gem pickup range' };
+        else if (i === 15) reward = { type: 'title', name: 'Cowabunga Title', icon: '🛹', value: 'Cowabunga', rarity: 'rare', desc: 'Eat my shorts! Skater style unlocked.' };
         else if (i === 10) reward = { type: 'maxhp', name: '+25 Max HP Buff', icon: '❤️', value: 25, rarity: 'rare', desc: 'Permanent +25 max HP' };
-        else if (i === 5) reward = { type: 'title', name: 'Apprentice Title', icon: '🌟', value: 'Apprentice', rarity: 'rare', desc: 'Unlock "Apprentice" title' };
+        else if (i === 5) reward = { type: 'title', name: "D'oh-Master Title", icon: '🍩', value: "D'oh-Master", rarity: 'rare', desc: 'Mmm... donuts. Your first Springfield title.' };
+        else if (i === 35) reward = { type: 'cooldown', name: '-25% Cooldown', icon: '⏳', value: 0.25, rarity: 'legendary', desc: 'Permanent -25% spell cooldown' };
+        else if (i === 8) reward = { type: 'magnet', name: '+50 Magnet Range', icon: '🧲', value: 50, rarity: 'epic', desc: 'Permanent +50 gem pickup range' };
         else if (i % 7 === 0) reward = { type: 'startxp', name: '+100 Starting XP', icon: '✨', value: 100, rarity: 'rare', desc: '+100 XP given at game start' };
         else if (i % 5 === 0) reward = { type: 'maxhp', name: '+10 Max HP', icon: '❤️', value: 10, rarity: 'rare', desc: '+10 max HP boost' };
         else if (i % 3 === 0) reward = { type: 'damage', name: '+5% Damage', icon: '💥', value: 0.05, rarity: 'common', desc: '+5% spell damage' };
@@ -4712,12 +5113,31 @@
     // ===================== PERMANENT TITLES VAULT =====================
     // Stored separately from Battle Pass so titles SURVIVE season resets
 
-    // Master library of every title that exists in the game (from any source)
-    const TITLE_LIBRARY = [
-      { name: 'Apprentice',       icon: '🌟', rarity: 'rare',      source: 'Battle Pass Tier 5',  desc: 'Awarded at Battle Pass Tier 5 — your first step into magic.' },
-      { name: 'Veteran Mage',     icon: '🎖️', rarity: 'epic',      source: 'Battle Pass Tier 30', desc: 'Awarded at Battle Pass Tier 30 — proven warrior of the realm.' },
-      { name: 'Grand Champion',   icon: '👑', rarity: 'legendary', source: 'Battle Pass Tier 50', desc: 'Awarded at Battle Pass Tier 50 — the ultimate Spellweaver.' }
+    // Season 1 legacy titles are preserved only if the player already owns them.
+    // They no longer show as extra locked titles in Season 2.
+    const LEGACY_TITLE_LIBRARY = [
+      { name: 'Apprentice',       icon: '🌟', rarity: 'rare',      source: '⭐ S1 Legacy', desc: 'Earned during Season 1.' },
+      { name: 'Veteran Mage',     icon: '🎖️', rarity: 'epic',      source: '⭐ S1 Legacy', desc: 'Earned during Season 1.' },
+      { name: 'Grand Champion',   icon: '👑', rarity: 'legendary', source: '⭐ S1 Legacy', desc: 'Earned during Season 1.' }
     ];
+
+    // Current Battle Pass titles only.
+    const TITLE_LIBRARY = [
+      { name: "D'oh-Master",      icon: '🍩', rarity: 'rare',      source: '🍩 S2 Tier 5',  desc: "Mmm... donuts. Earned by surviving Springfield's chaos at Tier 5." },
+      { name: 'Cowabunga',        icon: '🛹', rarity: 'rare',      source: '🛹 S2 Tier 15', desc: 'Eat my shorts! Earned at Tier 15 of the Springfield Battle Pass.' },
+      { name: 'Saxophonist',      icon: '🎷', rarity: 'epic',      source: '🎷 S2 Tier 30', desc: 'Smooth jazz mastery. Earned at Tier 30 of Season 2.' },
+      { name: 'Krusty Burger King', icon: '🍔', rarity: 'epic',    source: '🍔 S2 Tier 40', desc: 'Hey hey, kids! Greasiest title in Springfield.' },
+      { name: 'Nuclear King',     icon: '⚛️', rarity: 'legendary', source: '⚛️ S2 Tier 50', desc: "Excellent. Mr. Burns himself would approve. Season 2 max-tier title." }
+    ];
+
+    function getVisibleTitleLibrary(owned) {
+      const legacyOwned = LEGACY_TITLE_LIBRARY.filter(t => owned.includes(t.name));
+      return [...legacyOwned, ...TITLE_LIBRARY];
+    }
+
+    function findTitleMeta(name, owned = []) {
+      return getVisibleTitleLibrary(owned).find(t => t.name === name) || { name, icon: '🎖️', rarity: 'rare', source: 'Unlocked', desc: 'Unlocked title.' };
+    }
 
     function getTitlesVault() {
       try {
@@ -4726,8 +5146,19 @@
         const bp = JSON.parse(localStorage.getItem('spellweaver_battlepass') || '{}');
         if (bp.titles && Array.isArray(bp.titles)) {
           bp.titles.forEach(t => { if (!stored.owned.includes(t)) stored.owned.push(t); });
-          localStorage.setItem('spellweaver_titles_vault', JSON.stringify(stored));
         }
+        // Legacy safety net: Season 1 titles may exist under older keys or as the
+        // equipped title. Preserve them forever in the vault before Season 2 UI loads.
+        ['spellweaver_s1_titles', 'spellweaver_legacy_titles', 'spellweaver_titles', 'spellweaver_owned_titles'].forEach(key => {
+          try {
+            const val = JSON.parse(localStorage.getItem(key) || 'null');
+            const list = Array.isArray(val) ? val : (val && Array.isArray(val.owned) ? val.owned : []);
+            list.forEach(t => { if (t && !stored.owned.includes(t)) stored.owned.push(t); });
+          } catch {}
+        });
+        const equipped = localStorage.getItem('spellweaver_equipped_title');
+        if (equipped && !stored.owned.includes(equipped)) stored.owned.push(equipped);
+        localStorage.setItem('spellweaver_titles_vault', JSON.stringify(stored));
         return stored;
       } catch {
         return { owned: [] };
@@ -4759,8 +5190,10 @@
       const vault = getTitlesVault();
       const owned = vault.owned || [];
       const equipped = getEquippedTitle();
-      const total = TITLE_LIBRARY.length;
-      const pct = total > 0 ? Math.round((owned.length / total) * 100) : 0;
+      const visibleLibrary = getVisibleTitleLibrary(owned);
+      const total = visibleLibrary.length;
+      const currentSeasonOwned = TITLE_LIBRARY.filter(t => owned.includes(t.name)).length;
+      const pct = TITLE_LIBRARY.length > 0 ? Math.round((currentSeasonOwned / TITLE_LIBRARY.length) * 100) : 0;
 
       // Stats
       document.getElementById('titles-stat-owned').textContent = owned.length;
@@ -4774,7 +5207,7 @@
       // Equipped display
       const eqDiv = document.getElementById('titles-equipped-display');
       if (equipped) {
-        const meta = TITLE_LIBRARY.find(t => t.name === equipped) || { icon: '🎖️' };
+        const meta = findTitleMeta(equipped, owned);
         eqDiv.innerHTML = `
           <div class="flex items-center justify-center gap-3">
             <span class="text-3xl">${meta.icon}</span>
@@ -4794,7 +5227,7 @@
       // Library list
       const lib = document.getElementById('titles-library');
       lib.innerHTML = '';
-      TITLE_LIBRARY.forEach(t => {
+      visibleLibrary.forEach(t => {
         const isOwned = owned.includes(t.name);
         const isEquipped = equipped === t.name;
         const rarityColor = t.rarity === 'legendary' ? 'amber' : t.rarity === 'epic' ? 'purple' : 'cyan';
@@ -4844,6 +5277,8 @@
       renderTitlesVault();
       document.getElementById('modal-titles').classList.remove('hidden');
     });
+
+    // (Season 2 preview JS removed — Season 2 is the active season now!)
     document.getElementById('btn-close-titles').addEventListener('click', () => {
       document.getElementById('modal-titles').classList.add('hidden');
     });
@@ -4856,8 +5291,9 @@
     }
 
     function renderTitlesList() {
-      const data = getBpData();
-      const titles = data.titles || [];
+      // Use the permanent vault (not just bp.titles) so ALL owned titles show
+      const vault = getTitlesVault();
+      const titles = vault.owned || [];
       const equipped = getEquippedTitle();
       const list = document.getElementById('bp-titles-list');
       const countEl = document.getElementById('bp-title-count');
@@ -4983,7 +5419,7 @@
 
     // ===================== PROMO CODES & ADMIN SYSTEM =====================
     const REDEEM_CODES = {
-      'ADMIN_PANEL!': { type: 'admin', message: '👑 ADMIN ACCESS GRANTED!' },
+      'ADMINPANEL!@': { type: 'admin', message: '👑 ADMIN ACCESS GRANTED!' },
       'SPELLDEV!': { type: 'dev', message: '🛠️ DEV ACCESS GRANTED — Lite Panel Unlocked!' },
       'FREEHEALTH': { type: 'reward', message: '+50 Max HP saved for next run!', apply: () => { localStorage.setItem('spellweaver_bonushp', '50'); } },
       'SPEEDDEMON': { type: 'reward', message: '+15% movement speed bonus saved!', apply: () => { localStorage.setItem('spellweaver_bonusspeed', '0.15'); } },
@@ -5204,6 +5640,196 @@
     document.getElementById('btn-close-admin').addEventListener('click', () => {
       document.getElementById('modal-admin').classList.add('hidden');
     });
+
+    // ===================== 🎬 LIVE EVENT SYSTEM =====================
+    // Toggle custom message input visibility
+    document.getElementById('live-event-type').addEventListener('change', (e) => {
+      document.getElementById('live-event-msg-wrap').classList.toggle('hidden', e.target.value !== 'custom-msg');
+    });
+
+    // Broadcast live event
+    document.getElementById('btn-live-event').addEventListener('click', async () => {
+      const eventType = document.getElementById('live-event-type').value;
+      const customMsg = document.getElementById('live-event-msg')?.value || '';
+      const statusEl = document.getElementById('live-event-status');
+
+      const eventPayload = {
+        type: eventType,
+        message: eventType === 'custom-msg' ? customMsg : null,
+        timestamp: Date.now(),
+        active: true
+      };
+
+      // Try broadcasting via Firebase Realtime Database
+      try {
+        if (window.firebaseReady && window.fbDb) {
+          const { ref, set } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js');
+          await set(ref(window.fbDb, 'liveEvent'), eventPayload);
+          statusEl.textContent = '✅ Event broadcasted to all players!';
+          statusEl.className = 'mt-2 text-center text-[10px] font-display py-2 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-300';
+        } else {
+          // Fallback: apply locally only
+          handleLiveEvent(eventPayload);
+          statusEl.textContent = '⚠️ Firebase offline — applied locally only';
+          statusEl.className = 'mt-2 text-center text-[10px] font-display py-2 rounded-lg bg-amber-950/40 border border-amber-500/40 text-amber-300';
+        }
+      } catch (err) {
+        console.error('Live event broadcast failed:', err);
+        handleLiveEvent(eventPayload); // still apply locally
+        statusEl.textContent = '⚠️ Broadcast error — applied locally';
+        statusEl.className = 'mt-2 text-center text-[10px] font-display py-2 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300';
+      }
+      statusEl.classList.remove('hidden');
+      setTimeout(() => statusEl.classList.add('hidden'), 5000);
+    });
+
+    // Handle incoming live event (called by Firebase listener OR locally)
+    function handleLiveEvent(event) {
+      if (!event || !event.active) return;
+      // Apply gameplay effects
+      if (event.type === 'boss-rush' && gameState.active && gameState.player) { for (let i = 0; i < 5; i++) setTimeout(() => spawnBoss(), i * 1500); }
+      if (event.type === 'donut-rain' && gameState.active) { for (let i = 0; i < 40; i++) gameState.fallingDonuts.push(new FallingDonut()); }
+      if (event.type === 'nuclear-meltdown' && gameState.active) { camera.shakeIntensity = 40; setTimeout(() => camera.shakeIntensity = 0, 4000); }
+      // Season 2 launch → full animated cutscene
+      if (event.type === 'season2-launch') { runSeason2Cutscene(); return; }
+      // All other events → quick overlay
+      let icon='🍩',title='LIVE EVENT',subtitle='',color='#facc15';
+      if (event.type==='double-xp'){icon='⚡';title='DOUBLE XP ACTIVATED';subtitle='All XP gains doubled!';color='#a78bfa';}
+      else if (event.type==='boss-rush'){icon='👁️';title='BOSS RUSH INCOMING';subtitle='5 bosses spawning NOW!';color='#f43f5e';}
+      else if (event.type==='donut-rain'){icon='🍩';title='MEGA DONUT RAIN';subtitle='Donuts EVERYWHERE!';color='#ec4899';}
+      else if (event.type==='nuclear-meltdown'){icon='☢️';title='NUCLEAR MELTDOWN';subtitle="Mr. Burns has done it again!";color='#22c55e';}
+      else if (event.type==='custom-msg'){icon='📢';title='ANNOUNCEMENT';subtitle=event.message||'Important message!';color='#06b6d4';}
+      const ov=document.createElement('div');
+      ov.className='fixed inset-0 z-[9999] flex flex-col items-center justify-center pointer-events-none';
+      ov.style.cssText='background:rgba(0,0,0,0.88);opacity:0;transition:opacity 0.6s;';
+      ov.innerHTML=`<div style="transform:scale(0.3);opacity:0;transition:transform 0.6s cubic-bezier(.34,1.56,.64,1),opacity 0.5s" id="_ev_inner" class="text-center">
+        <div style="font-size:90px;filter:drop-shadow(0 0 50px ${color})">${icon}</div>
+        <h1 class="font-fantasy font-black text-4xl md:text-6xl mt-4" style="color:${color};text-shadow:0 0 40px ${color}">${title}</h1>
+        <p class="font-display text-lg text-white/75 mt-3 tracking-wider">${subtitle}</p>
+        <div class="mt-5 flex items-center justify-center gap-2">
+          <div class="w-2 h-2 rounded-full animate-pulse" style="background:${color};box-shadow:0 0 12px ${color}"></div>
+          <span class="font-display text-[11px] tracking-[0.3em] uppercase" style="color:${color}">LIVE EVENT</span>
+          <div class="w-2 h-2 rounded-full animate-pulse" style="background:${color};box-shadow:0 0 12px ${color}"></div>
+        </div></div>`;
+      document.body.appendChild(ov);
+      try{playSound('levelup');setTimeout(()=>playSound('powerup'),400);}catch{}
+      requestAnimationFrame(()=>{ov.style.opacity='1';const inn=document.getElementById('_ev_inner');if(inn){inn.style.transform='scale(1)';inn.style.opacity='1';}});
+      setTimeout(()=>{ov.style.opacity='0';},4500);
+      setTimeout(()=>ov.remove(),5500);
+    }
+
+    // ===== 🛹 SEASON 2 CUTSCENE: Bart pushes S1, pulls S2, Lisa chases =====
+    function runSeason2Cutscene(){
+      const cvs=document.createElement('canvas');
+      cvs.className='fixed inset-0 z-[9999] w-screen h-screen';
+      cvs.style.cssText='pointer-events:none;';
+      cvs.width=window.innerWidth;cvs.height=window.innerHeight;
+      document.body.appendChild(cvs);
+      const c=cvs.getContext('2d');
+      const W=cvs.width,H=cvs.height;
+      let frame=0;const total=60*9;
+      const bart={x:-120,y:H*0.55,bob:0,arm:0,leg:0};
+      const lisa={x:-250,y:H*0.55,bob:0,arm:0,leg:0,on:false};
+      let s1x=W*0.5,s1a=1,s2x=-400,s2a=0,s2s=0.5,titleA=0;
+      let donuts=[];
+
+      function person(ctx,x,y,bob,arm,leg,isB){
+        ctx.save();ctx.translate(x,y+Math.sin(bob)*5);
+        ctx.fillStyle='rgba(0,0,0,0.12)';ctx.beginPath();ctx.ellipse(0,50,24,7,0,0,Math.PI*2);ctx.fill();
+        const lc=isB?'#3b82f6':'#ef4444';
+        ctx.strokeStyle=lc;ctx.lineWidth=7;ctx.lineCap='round';
+        ctx.beginPath();ctx.moveTo(-7,30);ctx.lineTo(-7+Math.sin(leg)*16,48);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(7,30);ctx.lineTo(7-Math.sin(leg)*16,48);ctx.stroke();
+        ctx.fillStyle=isB?'#f97316':'#ef4444';
+        ctx.beginPath();ctx.roundRect(-15,0,30,32,7);ctx.fill();
+        ctx.strokeStyle=isB?'#fdba74':'#fca5a5';ctx.lineWidth=6;
+        ctx.beginPath();ctx.moveTo(-15,10);ctx.lineTo(-15-Math.sin(arm)*20,10+Math.cos(arm)*17);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(15,10);ctx.lineTo(15+Math.sin(arm)*20,10+Math.cos(arm)*17);ctx.stroke();
+        ctx.fillStyle='#fde047';ctx.beginPath();ctx.arc(0,-12,20,0,Math.PI*2);ctx.fill();
+        if(isB){ctx.fillStyle='#fde047';for(let i=-2;i<3;i++){ctx.beginPath();ctx.moveTo(i*7-3,-30);ctx.lineTo(i*7+3,-30);ctx.lineTo(i*7,-44);ctx.fill();}}
+        else{ctx.fillStyle='#fde047';for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2-Math.PI/2;ctx.beginPath();ctx.moveTo(Math.cos(a)*18,-12+Math.sin(a)*18);ctx.lineTo(Math.cos(a)*30,-12+Math.sin(a)*30);ctx.lineTo(Math.cos(a+.4)*20,-12+Math.sin(a+.4)*20);ctx.fill();}}
+        ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-7,-14,6,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(7,-14,6,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#000';ctx.beginPath();ctx.arc(-5.5,-13,2.5,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(8,-13,2.5,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#000';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,-6,8,0.15,Math.PI-0.15);ctx.stroke();
+        ctx.restore();
+      }
+
+      function sign(ctx,x,y,text,alpha,scale,glow){
+        ctx.save();ctx.globalAlpha=alpha;ctx.translate(x,y);ctx.scale(scale,scale);
+        ctx.shadowBlur=30;ctx.shadowColor=glow;ctx.fillStyle='#1e293b';
+        ctx.beginPath();ctx.roundRect(-140,-55,280,110,20);ctx.fill();
+        ctx.strokeStyle=glow;ctx.lineWidth=4;ctx.stroke();ctx.shadowBlur=0;
+        ctx.fillStyle=glow;ctx.font="bold 44px 'Orbitron',sans-serif";ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(text,0,0);ctx.restore();
+      }
+
+      function bubble(ctx,x,y,text,w){
+        ctx.fillStyle='#fff';ctx.beginPath();ctx.roundRect(x+30,y-92,w,38,13);ctx.fill();
+        ctx.beginPath();ctx.moveTo(x+45,y-54);ctx.lineTo(x+28,y-38);ctx.lineTo(x+62,y-54);ctx.fill();
+        ctx.fillStyle='#000';ctx.font="bold 13px 'Plus Jakarta Sans',sans-serif";ctx.textAlign='left';
+        ctx.fillText(text,x+42,y-68);
+      }
+
+      function tick(){
+        frame++;c.clearRect(0,0,W,H);
+        const bg=Math.min(1,frame/30);
+        c.fillStyle=`rgba(5,5,15,${bg*0.92})`;c.fillRect(0,0,W,H);
+        c.strokeStyle='rgba(100,100,140,0.25)';c.lineWidth=2;
+        c.beginPath();c.moveTo(0,H*0.73);c.lineTo(W,H*0.73);c.stroke();
+        const t=frame/60;
+        // Phase 1: Bart runs in (0-2s)
+        if(t<2){bart.x+=(W*0.35-bart.x)*0.06;bart.bob+=0.25;bart.arm=Math.sin(bart.bob)*1.2;bart.leg=Math.sin(bart.bob)*1.4;}
+        // Phase 2: Push S1 away (2-3.5s)
+        if(t>=2&&t<3.5){s1x+=8;s1a=Math.max(0,1-(t-2)/1.5);bart.x+=3;bart.bob+=0.15;bart.arm=Math.sin(t*8)*0.6+0.8;bart.leg=Math.sin(bart.bob)*0.5;}
+        // Phase 3: Pull S2 in (3.5-5.5s)
+        if(t>=3.5&&t<5.5){bart.x+=(W*0.38-bart.x)*0.08;s2x+=(W*0.5-s2x)*0.06;s2a=Math.min(1,(t-3.5)/1.2);s2s=Math.min(1,0.5+(t-3.5)*0.3);bart.bob+=0.2;bart.arm=Math.sin(t*6)*1.0-0.5;bart.leg=Math.sin(bart.bob)*1.0;if(frame%8===0)donuts.push({x:Math.random()*W,y:-30,vy:2+Math.random()*3,rot:Math.random()*6,rs:(Math.random()-0.5)*0.08,sz:12+Math.random()*18,ci:Math.floor(Math.random()*6)});}
+        // Phase 4: Title + Lisa enters (5.5-7s)
+        if(t>=5.5&&t<7){titleA=Math.min(1,(t-5.5)/0.8);lisa.on=true;lisa.x+=(W*0.42-lisa.x)*0.05;lisa.bob+=0.3;lisa.arm=Math.sin(lisa.bob)*1.4;lisa.leg=Math.sin(lisa.bob)*1.6;}
+        // Phase 5: Bart runs, Lisa chases (7-9s)
+        if(t>=7){bart.x+=9;bart.bob+=0.35;bart.arm=Math.sin(bart.bob)*1.5;bart.leg=Math.sin(bart.bob)*1.8;lisa.on=true;lisa.x+=7;lisa.bob+=0.35;lisa.arm=Math.sin(lisa.bob)*1.5;lisa.leg=Math.sin(lisa.bob)*1.8;if(t>7.5)c.globalAlpha=Math.max(0,1-(t-7.5)/1.5);}
+        // Draw donuts
+        donuts.forEach(d=>{d.y+=d.vy;d.rot+=d.rs;if(typeof drawSpringfieldDonut==='function'){c.save();c.globalAlpha=(c.globalAlpha||1)*0.7;drawSpringfieldDonut(c,d.x,d.y,d.sz,d.rot,d.ci);c.restore();}});
+        donuts=donuts.filter(d=>d.y<H+60);
+        // Draw signs
+        if(s1a>0.01)sign(c,s1x,H*0.35,'SEASON 1',s1a,1,'#a78bfa');
+        if(s2a>0.01)sign(c,s2x,H*0.35,'SEASON 2',s2a,s2s,'#facc15');
+        // Draw characters
+        person(c,bart.x,bart.y,bart.bob,bart.arm,bart.leg,true);
+        if(lisa.on)person(c,lisa.x,lisa.y,lisa.bob,lisa.arm,lisa.leg,false);
+        // Title text
+        if(titleA>0){c.save();c.globalAlpha=(c.globalAlpha||1)*titleA;
+          c.fillStyle='#facc15';c.shadowBlur=40;c.shadowColor='#facc15';c.font="900 48px 'Cinzel',serif";c.textAlign='center';
+          c.fillText('SPRINGFIELD CHAOS',W/2,H*0.22);c.shadowBlur=0;
+          c.fillStyle='#fff';c.font="600 18px 'Orbitron',sans-serif";
+          c.fillText('🍩  THE SIMPSONS HAVE ARRIVED  🍩',W/2,H*0.22+45);
+          if(t>6&&t<8)bubble(c,bart.x,bart.y,'Eat my shorts! 🛹',180);
+          if(lisa.on&&t>7.2&&t<8.5)bubble(c,lisa.x,lisa.y,'BART!! Come back! 🎷',170);
+          c.restore();}
+        if(frame<total)requestAnimationFrame(tick);
+        else{cvs.style.transition='opacity 1s';cvs.style.opacity='0';setTimeout(()=>cvs.remove(),1200);}
+      }
+      try{playSound('levelup');setTimeout(()=>playSound('powerup'),600);setTimeout(()=>playSound('levelup'),2000);setTimeout(()=>playSound('powerup'),4000);}catch{}
+      requestAnimationFrame(tick);
+    }
+
+    // Listen for live events from Firebase (if available)
+    (async function initLiveEventListener() {
+      let tries = 0;
+      while (!window.firebaseReady && tries < 30) { await new Promise(r => setTimeout(r, 300)); tries++; }
+      if (!window.fbDb) return;
+      try {
+        const { ref, onValue } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js');
+        const liveRef = ref(window.fbDb, 'liveEvent');
+        let lastEventTime = 0;
+        onValue(liveRef, (snapshot) => {
+          const event = snapshot.val();
+          if (event && event.active && event.timestamp > lastEventTime) {
+            lastEventTime = event.timestamp;
+            handleLiveEvent(event);
+          }
+        });
+      } catch (err) { console.warn('Live event listener failed:', err); }
+    })();
 
     document.getElementById('btn-revoke-admin').addEventListener('click', () => {
       // Revoke whichever access tier they have (admin first)
@@ -5579,8 +6205,32 @@
         await new Promise(r => setTimeout(r, 150));
         tries++;
       }
+
+      // 🍩 SEASON 2 AUTO-LAUNCH: if this client hasn't launched S2 yet, do it now
+      // The first player to load this version triggers a global reset for everyone
+      const SEASON_2_FLAG = 'spellweaver_season2_launched_v1';
+      if (!localStorage.getItem(SEASON_2_FLAG)) {
+        console.log('🍩 Launching Season 2: Springfield Chaos!');
+        if (window.fbResetSeason) {
+          const newStart = await window.fbResetSeason();
+          if (newStart) {
+            seasonStartCached = newStart;
+            localStorage.setItem('spellweaver_season_start', newStart.toString());
+          }
+        }
+        // Also wipe the global leaderboard cutoff so old S1 entries are hidden
+        if (window.fbSetLbResetTime) {
+          await window.fbSetLbResetTime();
+          window._lbCachedCutoff = Date.now();
+          window._lbCutoffFetchTime = Date.now();
+        }
+        // Mark this client as having launched S2 so we don't loop reset
+        localStorage.setItem(SEASON_2_FLAG, Date.now().toString());
+      }
+
       await fetchGlobalSeasonStart();
       updateSeasonCountdown();
+      updateLbCountdown();
     })();
     setInterval(updateSeasonCountdown, 30000); // refresh every 30s
     // Re-sync season from server every 5 minutes (in case admin reset it)
@@ -6170,7 +6820,7 @@
             gameState.finalWaveTriggered = true;
             gameState.bossesSpawned = 10;
             gameState.victoryAchieved = true;
-            // Kill any remaining bosses
+            // Kill any remaining bosses (including Krusty)
             gameState.enemies.filter(e => e.isBoss).forEach(b => b.takeDamage(99999, '#ffffff'));
             triggerVictory();
           }
@@ -6583,6 +7233,7 @@
       gameState.projectiles = [];
       gameState.gems = [];
       gameState.particles = [];
+      gameState.fallingDonuts = [];
       gameState.floatingTexts = [];
       gameState.combo = 0;
       gameState.comboTimer = 0;
@@ -6592,17 +7243,19 @@
       gameState.bossesSpawned = 0;
       gameState.bossesDefeated = 0;
       gameState._errorCount = 0; // reset auto-recovery error counter
+      // (sfWorld removed — no longer used)
       gameState.waveKilled = 0;
       gameState.waveSpawned = 0;
       gameState.waveQuota = 0; // set immediately below
       gameState.waveBreakUntil = 0;
 
-      // Create new Player Mage
-      gameState.player = new Player(0, 0, gameState.classSelected);
+      // Create new Player Mage — spawn in safe area (0, 500)
+      gameState.player = new Player(0, 500, gameState.classSelected);
       // Set initial quota for wave 1 (must come after wave is set to 1)
       gameState.waveQuota = getWaveQuota();
-      camera.x = -window.innerWidth / 2;
-      camera.y = -window.innerHeight / 2;
+      // Centre camera on player
+      camera.x = gameState.player.x - window.innerWidth / 2;
+      camera.y = gameState.player.y - window.innerHeight / 2;
 
       // Reset timer UI formats
       updateHUD();
@@ -6843,7 +7496,7 @@
       if (!gameState.player) return;
       // ⏸️ Don't spawn during wave break cooldown
       if (gameState.waveBreakUntil && Date.now() < gameState.waveBreakUntil) return;
-      // ⛔ Don't spawn during the final wave (only the 10 bosses count)
+      // ⛔ Don't spawn during the final wave (only Krusty counts)
       if (gameState.finalWaveTriggered) return;
       // ⛔ Don't spawn if we've already hit the wave's quota — wait for kills to advance
       if ((gameState.waveSpawned || 0) >= (gameState.waveQuota || 0)) return;
@@ -6940,7 +7593,7 @@
       spawnWaveBanner();
       showWaveBreakBanner(5);
 
-      // Final wave at 50 — spawn 10 bosses
+      // Final wave at 50 — spawn Krusty the Clown
       if (gameState.wave === 50) {
         triggerFinalWave();
       }
@@ -6949,7 +7602,7 @@
     function spawnWaveBanner() {
       // Flash glowing wave update notification text
       const msg = gameState.wave === 50
-        ? `👑 FINAL WAVE 50! 10 ABYSSAL REAPERS APPROACH!`
+        ? `🤡 FINAL WAVE 50! KRUSTY THE CLOWN IS HERE!`
         : `🔱 WAVE ${gameState.wave} ARRIVES! HORDE SCALE INCREASED!`;
       gameState.floatingTexts.push(new FloatingText(
         gameState.player.x, 
@@ -6992,55 +7645,46 @@
       }, 1000);
     }
 
-    // === FINAL WAVE: spawn 10 bosses dramatically over a few seconds ===
+    // === FINAL WAVE: spawn 1 KRUSTY THE CLOWN mega-boss ===
     function triggerFinalWave() {
       gameState.finalWaveTriggered = true;
       gameState.bossesSpawned = 0;
       camera.shakeIntensity = 30;
       flashScreen();
       
-      // Show big warning banner permanently (until victory)
+      // Show big warning banner
       const warnEl = document.getElementById('hud-boss-warning');
       warnEl.classList.remove('hidden');
       warnEl.innerHTML = `
-        <span class="text-xl">👑</span>
+        <span class="text-xl">🤡</span>
         <div>
-          <p class="font-display font-extrabold text-sm tracking-widest text-amber-400">FINAL CONFRONTATION: 10 ABYSSAL REAPERS</p>
-          <p class="text-[10px] text-slate-300">Defeat them ALL to claim VICTORY!</p>
+          <p class="font-display font-extrabold text-sm tracking-widest text-amber-400">FINAL BOSS: KRUSTY THE CLOWN</p>
+          <p class="text-[10px] text-slate-300">HEY HEY! Defeat Krusty to win the game!</p>
         </div>
       `;
       clearTimeout(window._bossWarnTimeout);
       window._bossWarnTimeout = setTimeout(() => {
         warnEl.classList.add('hidden');
-      }, 5000);
+      }, 8000);
       
-      // Spawn 10 bosses, one per second, around the player
-      let spawnCount = 0;
-      const spawnInterval = setInterval(() => {
-        if (!gameState.active || gameState.victoryAchieved) {
-          clearInterval(spawnInterval);
-          return;
-        }
-        if (spawnCount >= 10) {
-          clearInterval(spawnInterval);
-          return;
-        }
+      // Spawn 1 Krusty mega-boss after a dramatic 2-second delay
+      setTimeout(() => {
+        if (!gameState.active || gameState.victoryAchieved) return;
         const p = gameState.player;
-        const angle = (spawnCount / 10) * Math.PI * 2 + Math.random() * 0.4;
-        const bx = p.x + Math.cos(angle) * 600;
-        const by = p.y + Math.sin(angle) * 600;
-        const boss = new Enemy(bx, by, 'boss');
-        // Slightly weaken final-wave bosses since there are 10 of them
-        // HARDER: final-wave bosses retain 70% of their HP (was 45%) — much tougher fight
-        boss.hp = boss.maxHp = boss.maxHp * 0.70;
-        gameState.enemies.push(boss);
-        gameState.activeBoss = boss; // last spawned tracked for HP bar
+        const angle = Math.random() * Math.PI * 2;
+        const bx = p.x + Math.cos(angle) * 500;
+        const by = p.y + Math.sin(angle) * 500;
+        const krusty = new Enemy(bx, by, 'krusty');
+        gameState.enemies.push(krusty);
+        gameState.activeBoss = krusty;
         document.getElementById('boss-hp-container').classList.remove('hidden');
-        gameState.bossesSpawned++;
-        spawnCount++;
+        document.getElementById('boss-name').textContent = '🤡 KRUSTY THE CLOWN';
+        gameState.bossesSpawned = 10; // Set to 10 so victory check passes when Krusty dies
         playSound('hit');
-        camera.shakeIntensity = 15;
-      }, 1200);
+        camera.shakeIntensity = 25;
+        // Floating text
+        gameState.floatingTexts.push(new FloatingText(bx, by - 60, '🤡 HEY HEY KIDS!', '#22c55e', true));
+      }, 2000);
     }
 
     // === VICTORY ===
@@ -7110,18 +7754,28 @@
       const choices = buildUpgradePool(p);
 
       // === WEIGHTED RARITY DRAFT ===
+      // Season 2: Simpsons upgrades get a bonus weight multiplier
       const rarityWeights = { Common: 60, Rare: 25, Epic: 10, Legendary: 3 };
+      // Simpsons-themed stats get a 2x chance bonus to show up
+      const SIMPSONS_STATS = new Set(['donutHeal','duffBeer','eatMyShorts','lisaSmart','krustyBurger','releaseHounds','nuclearPower','doh']);
+      const originalWeightedPick = weightedPick; // will redefine below
       const selectedChoices = [];
 
       function weightedPick(pool) {
         if (!pool || pool.length === 0) return -1;
         if (pool.length === 1) return 0;
         let total = 0;
-        pool.forEach(c => { total += (rarityWeights[c && c.rarity] || 30); });
+        pool.forEach(c => {
+          let w = rarityWeights[c && c.rarity] || 30;
+          // Simpsons upgrades get 2.5x weight so they appear ~2.5x more often
+          if (c && c.stat && SIMPSONS_STATS.has(c.stat)) w = Math.round(w * 2.5);
+          total += w;
+        });
         if (total <= 0) return Math.floor(Math.random() * pool.length);
         let roll = Math.random() * total;
         for (let i = 0; i < pool.length; i++) {
-          const w = rarityWeights[pool[i] && pool[i].rarity] || 30;
+          let w = rarityWeights[pool[i] && pool[i].rarity] || 30;
+          if (pool[i] && pool[i].stat && SIMPSONS_STATS.has(pool[i].stat)) w = Math.round(w * 2.5);
           if (roll < w) return i;
           roll -= w;
         }
@@ -7477,6 +8131,72 @@
         rarity: 'Legendary'
       });
 
+      // ====== 🍩 SEASON 2: SPRINGFIELD UPGRADES ======
+
+      pool.push({
+        type: 'passive',
+        stat: 'donutHeal',
+        title: "🍩 Mmm... Donuts",
+        desc: "Homer's blessing — instantly restore 50 HP and gain +20 max HP permanently.",
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'duffBeer',
+        title: '🍺 Duff Beer Power',
+        desc: '+25% movement speed but you wobble slightly. Perfectly cromulent buff.',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'eatMyShorts',
+        title: '🛹 Eat My Shorts!',
+        desc: "Bart's spirit — +20% damage and +1 piercing to all projectiles. Cowabunga!",
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'lisaSmart',
+        title: '🎷 Lisa\'s Wisdom',
+        desc: 'Smartest mage in town — +40% XP gain from all sources.',
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'krustyBurger',
+        title: '🍔 Krusty Burger Combo',
+        desc: 'Hey hey, kids! +1 HP healed every kill (stacks with Vampiric Aura).',
+        rarity: 'Rare'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'releaseHounds',
+        title: '🐕 Release the Hounds!',
+        desc: "Mr. Burns' minions — Enemies that touch you take 25 damage. Excellent.",
+        rarity: 'Epic'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'nuclearPower',
+        title: '⚛️ Nuclear Power Plant',
+        desc: 'LEGENDARY: All your spells gain a radioactive aura — +75% damage!',
+        rarity: 'Legendary'
+      });
+
+      pool.push({
+        type: 'passive',
+        stat: 'doh',
+        title: "🤦 D'oh! Insurance",
+        desc: "When you die, automatically revive once at 25 HP. Nobody saw that, right?",
+        rarity: 'Legendary'
+      });
+
       return pool;
     }
 
@@ -7605,6 +8325,47 @@
             p.phoenixCharges = (p.phoenixCharges || 0) + 1;
             spawnParticles(p.x, p.y, '#fbbf24', 50, 5, 50, 5, true);
             break;
+
+          // === 🍩 SEASON 2 SIMPSONS UPGRADE EFFECTS ===
+          case 'donutHeal':
+            p.maxHp += 20;
+            p.hp = Math.min(p.maxHp, p.hp + 50);
+            spawnParticles(p.x, p.y, '#fbbf24', 30, 4, 35, 3, true);
+            spawnParticles(p.x, p.y, '#ec4899', 15, 3, 30, 3, true);
+            break;
+          case 'duffBeer':
+            p.speed *= 1.25;
+            spawnParticles(p.x, p.y, '#84cc16', 25, 4, 30, 3, true);
+            break;
+          case 'eatMyShorts':
+            p.damageMult += 0.20;
+            p.bonusPierce = (p.bonusPierce || 0) + 1;
+            spawnParticles(p.x, p.y, '#f97316', 25, 4, 30, 3, true);
+            break;
+          case 'lisaSmart':
+            p.xpMult = (p.xpMult || 1) + 0.40;
+            spawnParticles(p.x, p.y, '#a78bfa', 25, 4, 30, 3, true);
+            break;
+          case 'krustyBurger':
+            p.lifesteal = (p.lifesteal || 0) + 1;
+            spawnParticles(p.x, p.y, '#facc15', 25, 4, 30, 3, true);
+            break;
+          case 'releaseHounds':
+            p.thorns = (p.thorns || 0) + 25;
+            spawnParticles(p.x, p.y, '#10b981', 25, 4, 30, 3, true);
+            break;
+          case 'nuclearPower':
+            p.damageMult += 0.75;
+            // Visual aura — radioactive green particles around the mage
+            p.nuclearAura = true;
+            spawnParticles(p.x, p.y, '#84cc16', 60, 5, 50, 4, true);
+            break;
+          case 'doh':
+            // Auto-revive: same as phoenix but extra
+            p.phoenixCharges = (p.phoenixCharges || 0) + 1;
+            p.dohRevive = true;
+            spawnParticles(p.x, p.y, '#fbbf24', 50, 5, 50, 5, true);
+            break;
         }
         gameState.floatingTexts.push(new FloatingText(p.x, p.y - 20, `PASSIVE ENCHANTED: ${choice.title.toUpperCase()}`, '#facc15', true));
       }
@@ -7701,17 +8462,18 @@
     }
 
     function drawBgRunes(ctx) {
-      gameState.bgRunes.forEach(rune => {
+      // Season 2: Replace old magic runes with Springfield emoji floaters
+      const sfChars = ['🍩','🍔','🎷','🛹','⚛️','🌭','📺','🍺','☢️','🍕','🦍','🏠'];
+      gameState.bgRunes.forEach((rune, i) => {
         rune.rotation += rune.rotSpeed;
-        // Parallax effect: closer runes move more with camera
+        // Re-assign Simpsons chars on the fly (keeps original parallax/position data)
+        rune.char = sfChars[i % sfChars.length];
         const px = rune.worldX - camera.x * (1 - rune.parallax);
         const py = rune.worldY - camera.y * (1 - rune.parallax);
-        
         ctx.save();
-        ctx.globalAlpha = rune.alpha;
+        ctx.globalAlpha = rune.alpha * 0.65;
         ctx.translate(px + camera.x, py + camera.y);
         ctx.rotate(rune.rotation);
-        ctx.fillStyle = rune.color;
         ctx.font = `${rune.size}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -7895,8 +8657,9 @@
           // Target smooth follow player with slight lag dampening
           if (gameState.player) {
             safeRun('camera follow', () => {
-              camera.x += (gameState.player.x - window.innerWidth / 2 - camera.x) * 0.12;
-              camera.y += (gameState.player.y - window.innerHeight / 2 - camera.y) * 0.12;
+              // Hard-lock camera to player — no lag, player always centred
+              camera.x = gameState.player.x - window.innerWidth / 2;
+              camera.y = gameState.player.y - window.innerHeight / 2;
             });
           }
 
@@ -7928,6 +8691,10 @@
 
           safeForEach('enemy.update', gameState.enemies, (enemy) => enemy.update());
           safeForEach('gem.update', gameState.gems, (gem) => gem.update());
+          // Falling donuts
+          if (Math.random() < 0.012) gameState.fallingDonuts.push(new FallingDonut());
+          gameState.fallingDonuts.forEach(d => d.update());
+          gameState.fallingDonuts = gameState.fallingDonuts.filter(d => d.y < camera.y + window.innerHeight + 100).slice(-18);
           safeForEach('particle.update', gameState.particles, (p) => p.update());
           gameState.particles = gameState.particles.filter(p => p.life > 0);
           safeForEach('floatText.update', gameState.floatingTexts, (ft) => ft.update());
@@ -7943,6 +8710,7 @@
         safeRun('drawBgRunes', () => drawBgRunes(ctx));
 
         safeForEach('gem.draw', gameState.gems, (gem) => gem.draw(ctx));
+        gameState.fallingDonuts.forEach(d => { d.draw(ctx); });
         if (gameState.player) safeRun('player.draw', () => gameState.player.draw(ctx));
         safeForEach('enemy.draw', gameState.enemies, (enemy) => enemy.draw(ctx));
         safeForEach('proj.draw', gameState.projectiles, (proj) => proj.draw(ctx));
@@ -7963,98 +8731,578 @@
       gameState.animationFrameId = requestAnimationFrame(gameLoop);
     }
 
-    // Draws an attractive sliding neon grid matching the camera position
+    // ===== SPRINGFIELD TILED BACKGROUND =====
+    // Simple, bug-free, camera-correct Springfield floor tiles + floating sky donuts
+    // No world objects, no parallax bugs — just tiles that scroll with camera
+
+    // ===== SEASON 2: SPRINGFIELD TILED BACKGROUND =====
     function drawMapGrid(ctx) {
-      const gridSize = 120;
-      // Calculate viewport boundary coords
-      const startX = Math.floor(camera.x / gridSize) * gridSize - gridSize;
-      const endX = startX + window.innerWidth + gridSize * 2;
-      const startY = Math.floor(camera.y / gridSize) * gridSize - gridSize;
-      const endY = startY + window.innerHeight + gridSize * 2;
+      const cx = camera.x;
+      const cy = camera.y;
+      const W = window.innerWidth;
+      const H = window.innerHeight;
 
-      ctx.save();
-      ctx.strokeStyle = '#11112b';
-      ctx.lineWidth = 1.2;
+      // 1. Solid Yellow Sky
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(cx, cy, W, H);
 
-      // Draw vertical lines
-      for (let x = startX; x < endX; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, startY);
-        ctx.lineTo(x, endY);
-        ctx.stroke();
-      }
-
-      // Draw horizontal lines
-      for (let y = startY; y < endY; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(startX, y);
-        ctx.lineTo(endX, y);
-        ctx.stroke();
-      }
-
-      // Overlay small glowing stars at crossings for magical aesthetic
-      if (gameState.graphicsQuality !== 'low') {
-        ctx.fillStyle = '#2e254d';
-        for (let x = startX; x < endX; x += gridSize) {
-          for (let y = startY; y < endY; y += gridSize) {
-            // Draw minute dots
-            ctx.beginPath();
-            ctx.arc(x, y, 1.8, 0, Math.PI * 2);
-            ctx.fill();
+      // 2. Road/Grass Tiling
+      const TILE = 200;
+      const startX = Math.floor(cx / TILE) * TILE;
+      const startY = Math.floor(cy / TILE) * TILE;
+      
+      // Simple alternating grass tiles
+      ctx.fillStyle = '#facc15'; 
+      for (let tx = startX; tx < cx + W + TILE; tx += TILE) {
+        for (let ty = startY; ty < cy + H + TILE; ty += TILE) {
+          if ((tx + ty) % (TILE * 2) === 0) {
+            ctx.fillStyle = '#eab308'; // darker yellow tile
+            ctx.fillRect(tx, ty, TILE, TILE);
+          } else {
+            ctx.fillStyle = '#fde047'; // lighter
+            ctx.fillRect(tx, ty, TILE, TILE);
           }
         }
+      }
+      
+      // Road removed for Season 2
+    }
+    /* Old broken Springfield world renderer disabled. It left top-level loops that
+       crashed the script before button listeners could attach.
+    function initSpringfieldWorld() {}
+    function drawSpringfieldCloud() {}
+    function drawSpringfieldDonut() {}
+    function drawSpringfieldTree() {}
+    function drawSpringfieldHouse() {}
+    let sfWorld = null;
+
+      // 40 fluffy clouds scattered across the sky
+      for (let i = 0; i < 40; i++) {
+        sfWorld.clouds.push({
+          x: (Math.random() - 0.5) * W * 1.5,
+          y: (Math.random() - 0.5) * H * 0.6 - H * 0.1,
+          scale: 0.6 + Math.random() * 1.4,
+          parallax: 0.15 + Math.random() * 0.25
+        });
+      }
+      // 30 floating donuts — Springfield's eternal gift from Homer
+      for (let i = 0; i < 30; i++) {
+        sfWorld.donuts.push({
+          x: (Math.random() - 0.5) * W * 1.6,
+          y: (Math.random() - 0.5) * H * 0.8,
+          size: 16 + Math.random() * 28,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.012,
+          colorIndex: Math.floor(Math.random() * 8),
+          parallax: 0.35 + Math.random() * 0.4
+        });
+      }
+      // 50 Springfield trees — placed in world space around the grass line (y ≈ 400-700)
+    // (old Springfield world helpers removed — replaced by tile system above)
+    function __sfOld1() {
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.arc(x,           y,          22 * scale, 0, Math.PI * 2);
+      ctx.arc(x + 24*scale, y - 10*scale, 28*scale, 0, Math.PI * 2);
+      ctx.arc(x + 52*scale, y,          20*scale, 0, Math.PI * 2);
+      ctx.arc(x + 28*scale, y + 12*scale,22*scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    function drawSpringfieldDonut(ctx, x, y, size, rotation, colorIndex) {
+      const palettes = [
+        { outer:'#fbcfe8', inner:'#f9a8d4', glow:'#ec4899' },
+        { outer:'#fed7aa', inner:'#fdba74', glow:'#f97316' },
+        { outer:'#fde68a', inner:'#fcd34d', glow:'#f59e0b' },
+        { outer:'#bbf7d0', inner:'#86efac', glow:'#10b981' },
+        { outer:'#bfdbfe', inner:'#93c5fd', glow:'#3b82f6' },
+        { outer:'#e9d5ff', inner:'#c4b5fd', glow:'#a855f7' },
+        { outer:'#fecaca', inner:'#fca5a5', glow:'#ef4444' },
+        { outer:'#f5f5f4', inner:'#e7e5e4', glow:'#a8a29e' }
+      ];
+      const p = palettes[colorIndex % palettes.length];
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = p.glow;
+      // Dough
+      ctx.fillStyle = '#a16207';
+      ctx.beginPath();
+      ctx.arc(0,0,size,0,Math.PI*2);
+      ctx.arc(0,0,size*0.42,0,Math.PI*2,true);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // Frosting
+      ctx.fillStyle = p.outer;
+      ctx.beginPath();
+      ctx.arc(0,0,size*0.97,0,Math.PI*2);
+      ctx.arc(0,0,size*0.5,0,Math.PI*2,true);
+      ctx.fill();
+      ctx.fillStyle = p.inner;
+      ctx.beginPath();
+      ctx.arc(0,0,size*0.88,0,Math.PI*2);
+      ctx.arc(0,0,size*0.55,0,Math.PI*2,true);
+      ctx.fill();
+      // Sprinkles
+      const spk = ['#ef4444','#3b82f6','#facc15','#10b981','#a855f7','#ffffff'];
+      for (let i = 0; i < 8; i++) {
+        const a = (i/8)*Math.PI*2+(colorIndex*0.3);
+        const r = size*0.71;
+        ctx.save();
+        ctx.translate(Math.cos(a)*r, Math.sin(a)*r);
+        ctx.rotate(a+1);
+        ctx.fillStyle = spk[(i+colorIndex)%spk.length];
+        ctx.fillRect(-1.5,-size*0.09,3,size*0.18);
+        ctx.restore();
       }
       ctx.restore();
     }
 
+    function drawSpringfieldTree(ctx, x, y, size) {
+      // Trunk
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(x - size*0.13, y, size*0.26, size*0.55);
+      // Foliage blobs (classic Simpsons round tree)
+      ctx.fillStyle = '#16a34a';
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = '#15803d';
+      ctx.beginPath();
+      ctx.arc(x, y - size*0.15, size*0.58, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#22c55e';
+      ctx.beginPath();
+      ctx.arc(x - size*0.3, y - size*0.05, size*0.38, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + size*0.3, y - size*0.05, size*0.38, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
 
-    // --- TITLE MENU ANIMATION PARTICLES ENGINE ---
-    // Runs an autonomous peaceful background render on title load
-    const menuParticles = [];
+    function drawSpringfieldHouse(ctx, x, y, w, h, color) {
+      // Walls
+      ctx.fillStyle = color;
+      ctx.fillRect(x - w/2, y - h, w, h);
+      ctx.strokeStyle = '#78350f';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x - w/2, y - h, w, h);
+      // Roof triangle
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath();
+      ctx.moveTo(x - w/2 - 6, y - h);
+      ctx.lineTo(x, y - h - w*0.45);
+      ctx.lineTo(x + w/2 + 6, y - h);
+      ctx.closePath();
+      ctx.fill();
+      // Door
+      ctx.fillStyle = '#7c3aed';
+      ctx.fillRect(x - w*0.12, y - h*0.4, w*0.24, h*0.4);
+      // Window
+      ctx.fillStyle = '#bae6fd';
+      ctx.strokeStyle = '#1e40af';
+      ctx.lineWidth = 1;
+      ctx.fillRect(x - w*0.4, y - h*0.7, w*0.28, h*0.28);
+      ctx.strokeRect(x - w*0.4, y - h*0.7, w*0.28, h*0.28);
+      // Window cross
+      ctx.beginPath();
+      ctx.moveTo(x - w*0.26, y - h*0.7);
+      ctx.lineTo(x - w*0.26, y - h*0.42);
+      ctx.moveTo(x - w*0.4,  y - h*0.56);
+      ctx.lineTo(x - w*0.12, y - h*0.56);
+      ctx.stroke();
+    }
+
+    function drawMapGrid(ctx) {
+      if (!sfWorld) initSpringfieldWorld();
+      // Tick donut rotations
+      sfWorld.donuts.forEach(d => { d.rotation += d.rotSpeed; });
+      
+      // Falling donuts logic removed
+
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const cx = camera.x;
+      const cy = camera.y;
+      // Screen-space corners in world coords (what the camera sees)
+      const left = cx;
+      const top = cy;
+      const right = cx + W;
+      const bottom = cy + H;
+
+      // ── SKY GRADIENT (top yellow → bottom blue) ──────────────────────────────
+      const skyGrad = ctx.createLinearGradient(left, top, left, top + H);
+      skyGrad.addColorStop(0.00, '#fde047'); // sunny yellow top
+      skyGrad.addColorStop(0.45, '#fbbf24'); // warm amber midday
+      skyGrad.addColorStop(0.75, '#7dd3fc'); // sky blue transition
+      skyGrad.addColorStop(1.00, '#38bdf8'); // horizon blue
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(left, top, W, H);
+
+      // ── GROUND (fixed horizontal band — always y=400 in world space) ─────────
+      // Ground is a WORLD-space band, not screen-relative, so gems stay in place
+      const GROUND_WORLD_Y = 400; // fixed world Y where grass starts
+      const grassGrad = ctx.createLinearGradient(left, GROUND_WORLD_Y, left, GROUND_WORLD_Y + 600);
+      grassGrad.addColorStop(0, '#4ade80');
+      grassGrad.addColorStop(0.3, '#22c55e');
+      grassGrad.addColorStop(1,   '#15803d');
+      ctx.fillStyle = grassGrad;
+      ctx.fillRect(left, GROUND_WORLD_Y, W, 600);
+
+      // Grass wavy top edge
+      ctx.fillStyle = '#86efac';
+      ctx.beginPath();
+      ctx.moveTo(left, GROUND_WORLD_Y);
+      for (let gx = 0; gx <= W + 18; gx += 18) {
+        const wave = Math.sin((left + gx) * 0.025) * 7;
+        ctx.lineTo(left + gx, GROUND_WORLD_Y + wave);
+      }
+      ctx.lineTo(right, GROUND_WORLD_Y);
+      ctx.closePath();
+      ctx.fill();
+
+      // ── SIDEWALK / ROAD (world space) ────────────────────────────────────────
+      ctx.fillStyle = '#d6d3d1';
+      ctx.fillRect(left, GROUND_WORLD_Y + 120, W, 45);
+      ctx.setLineDash([28, 22]);
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(left, GROUND_WORLD_Y + 142);
+      ctx.lineTo(right, GROUND_WORLD_Y + 142);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // ── CLOUDS (true world coords, gentle parallax offset) ───────────────────
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      sfWorld.clouds.forEach(c => {
+        // Parallax: clouds drift slightly slower than camera → they seem distant
+        const px = c.x + cx * (c.parallax - 1); // offset from world pos
+        const py = c.y + cy * (c.parallax - 1);
+        if (px > left - 200 && px < right + 200 && py > top - 120 && py < GROUND_WORLD_Y) {
+          drawSpringfieldCloud(ctx, px, py, c.scale);
+        }
+      });
+      ctx.restore();
+
+      // ── HOUSES (true world coords, near grass band) ───────────────────────────
+      sfWorld.houses.forEach(h => {
+        if (h.x > left - 120 && h.x < right + 120 &&
+            h.y + h.h > top && h.y < bottom) {
+          drawSpringfieldHouse(ctx, h.x, h.y, h.w, h.h, h.color);
+        }
+      });
+
+      // ── TREES (true world coords) ─────────────────────────────────────────────
+      sfWorld.trees.forEach(t => {
+        if (t.x > left - 80 && t.x < right + 80 &&
+            t.y > top - 80 && t.y < bottom) {
+          drawSpringfieldTree(ctx, t.x, t.y, t.size);
+        }
+      });
+
+      // ── FLOATING DONUTS (world coords with gentle sky parallax) ───────────────
+      if (gameState.graphicsQuality !== 'low') {
+        sfWorld.donuts.forEach(d => {
+          const px = d.x + cx * (d.parallax - 1);
+          const py = d.y + cy * (d.parallax - 1);
+          if (px > left - 60 && px < right + 60 && py > top - 60 && py < GROUND_WORLD_Y) {
+            ctx.globalAlpha = 0.75;
+            drawSpringfieldDonut(ctx, px, py, d.size, d.rotation, d.colorIndex);
+            ctx.globalAlpha = 1;
+          }
+        });
+      }
+
+      // ── NUCLEAR COOLING TOWERS (fixed world position, far right) ─────────────
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      const towerX = 1200; // fixed world X
+      const towerBase = GROUND_WORLD_Y + 5;
+      const towerH = 280;
+      // Left tower
+      ctx.fillStyle = '#d1d5db';
+      ctx.beginPath();
+      ctx.moveTo(towerX - 44, towerBase);
+      ctx.lineTo(towerX - 28, towerBase - towerH);
+      ctx.arc(towerX - 36, towerBase - towerH, 8, 0, Math.PI, true);
+      ctx.lineTo(towerX - 52, towerBase);
+      ctx.fill();
+      // Stripe
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(towerX - 52, towerBase - towerH*0.55, 24, 8);
+      // Right tower
+      ctx.fillStyle = '#d1d5db';
+      ctx.beginPath();
+      ctx.moveTo(towerX + 10, towerBase);
+      ctx.lineTo(towerX + 26, towerBase - towerH * 0.88);
+      ctx.arc(towerX + 18, towerBase - towerH * 0.88, 8, 0, Math.PI, true);
+      ctx.lineTo(towerX + 2, towerBase);
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(towerX + 2, towerBase - towerH * 0.88 * 0.55, 24, 7);
+      // Steam puffs
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(towerX - 36, towerBase - towerH - 18, 14, 0, Math.PI*2);
+      ctx.arc(towerX + 18, towerBase - towerH * 0.88 - 16, 12, 0, Math.PI*2);
+      ctx.fill();
+    } // end __sfOld1
+    */
+
+    function drawSpringfieldDonut(ctx, x, y, size, rotation, colorIndex = 0) {
+      const palettes = [
+        { outer:'#fbcfe8', inner:'#f9a8d4', glow:'#ec4899' },
+        { outer:'#fed7aa', inner:'#fdba74', glow:'#f97316' },
+        { outer:'#fde68a', inner:'#fcd34d', glow:'#f59e0b' },
+        { outer:'#bbf7d0', inner:'#86efac', glow:'#10b981' },
+        { outer:'#bfdbfe', inner:'#93c5fd', glow:'#3b82f6' },
+        { outer:'#e9d5ff', inner:'#c4b5fd', glow:'#a855f7' }
+      ];
+      const p = palettes[colorIndex % palettes.length];
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = p.glow;
+      ctx.fillStyle = '#a16207';
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2, true);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = p.outer;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.95, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.52, 0, Math.PI * 2, true);
+      ctx.fill();
+      const sprinkles = ['#ef4444','#3b82f6','#facc15','#10b981','#ffffff'];
+      for (let i = 0; i < 7; i++) {
+        const a = i / 7 * Math.PI * 2;
+        ctx.save();
+        ctx.translate(Math.cos(a) * size * 0.72, Math.sin(a) * size * 0.72);
+        ctx.rotate(a);
+        ctx.fillStyle = sprinkles[(i + colorIndex) % sprinkles.length];
+        ctx.fillRect(-1.4, -size * 0.08, 2.8, size * 0.16);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // --- 🍩 SEASON 2 SPRINGFIELD MENU BG ENGINE ---
+    // Yellow-blue Simpsons sky with TONS of clouds + falling raining donuts
+    class FallingDonut {
+      constructor() {
+        this.x = camera.x + Math.random() * window.innerWidth;
+        this.y = camera.y - 50;
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = 2 + Math.random() * 3;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotSpeed = (Math.random() - 0.5) * 0.05;
+        this.size = 15 + Math.random() * 15;
+        this.colorIndex = Math.floor(Math.random() * 8);
+      }
+      update() { this.x += this.vx; this.y += this.vy; this.rotation += this.rotSpeed; }
+      draw(ctx) { drawSpringfieldDonut(ctx, this.x, this.y, this.size, this.rotation, this.colorIndex); }
+    }
+    const menuClouds = [];
+    const menuDonuts = [];      // ambient floating donuts (background depth)
+    const menuFallingDonuts = []; // donuts raining from the top of the screen
+    // Frosting color palette for variety
+    const FROSTING_COLORS = [
+      { outer: '#fbcfe8', inner: '#f9a8d4', glow: '#ec4899' }, // classic pink
+      { outer: '#fed7aa', inner: '#fdba74', glow: '#f97316' }, // orange
+      { outer: '#fde68a', inner: '#fcd34d', glow: '#f59e0b' }, // yellow
+      { outer: '#bbf7d0', inner: '#86efac', glow: '#10b981' }, // mint green
+      { outer: '#bfdbfe', inner: '#93c5fd', glow: '#3b82f6' }, // blue
+      { outer: '#e9d5ff', inner: '#c4b5fd', glow: '#a855f7' }, // purple
+      { outer: '#fecaca', inner: '#fca5a5', glow: '#ef4444' }, // red
+      { outer: '#f5f5f4', inner: '#e7e5e4', glow: '#a8a29e' }  // vanilla
+    ];
+
+    function spawnFallingDonut() {
+      menuFallingDonuts.push({
+        x: Math.random() * window.innerWidth,
+        y: -60, // start above the screen
+        vy: 0.8 + Math.random() * 2.2, // varied falling speed for parallax depth
+        vx: (Math.random() - 0.5) * 0.6, // slight horizontal drift
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.08,
+        size: 14 + Math.random() * 26,
+        alpha: 0.5 + Math.random() * 0.45,
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 0.02 + Math.random() * 0.03,
+        colorIndex: Math.floor(Math.random() * FROSTING_COLORS.length)
+      });
+    }
+
     function initMenuBg() {
       resizeCanvas(menuBgCanvas, menuBgCtx);
-      for (let i = 0; i < 65; i++) {
-        menuParticles.push({
+      // Way more clouds — three depth layers for parallax
+      for (let i = 0; i < 25; i++) {
+        // Depth layer: 0 = background (small/slow/faded), 1 = mid, 2 = front (big/fast/clear)
+        const depth = Math.random();
+        menuClouds.push({
+          x: Math.random() * window.innerWidth,
+          y: Math.random() * window.innerHeight * 0.8,
+          vx: 0.08 + depth * 0.55, // parallax: closer = faster
+          scale: 0.35 + depth * 1.4,
+          alpha: 0.35 + depth * 0.55
+        });
+      }
+      // Ambient floating donuts (slow drift in background)
+      for (let i = 0; i < 6; i++) {
+        menuDonuts.push({
           x: Math.random() * window.innerWidth,
           y: Math.random() * window.innerHeight,
-          vx: (Math.random() - 0.5) * 0.45,
-          vy: (Math.random() - 0.5) * 0.45,
-          radius: 1 + Math.random() * 3,
-          color: Math.random() < 0.4 ? '#ef4444' : (Math.random() < 0.7 ? '#c084fc' : '#22d3ee'),
-          alpha: 0.1 + Math.random() * 0.5
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: (Math.random() - 0.5) * 0.3,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.03,
+          size: 18 + Math.random() * 22,
+          alpha: 0.18 + Math.random() * 0.25,
+          colorIndex: Math.floor(Math.random() * FROSTING_COLORS.length)
         });
+      }
+      // Pre-fill the sky with a few falling donuts already in motion
+      for (let i = 0; i < 6; i++) {
+        spawnFallingDonut();
+        // Push them randomly down the screen so they don't all start at the top
+        menuFallingDonuts[menuFallingDonuts.length - 1].y = Math.random() * window.innerHeight;
       }
       animateMenuBg();
     }
 
+    function drawCloud(ctx, x, y, scale, alpha) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = 'rgba(255,255,255,0.6)';
+      // Cloud built from overlapping circles
+      ctx.beginPath();
+      ctx.arc(x, y, 24 * scale, 0, Math.PI * 2);
+      ctx.arc(x + 22 * scale, y - 8 * scale, 28 * scale, 0, Math.PI * 2);
+      ctx.arc(x + 50 * scale, y, 22 * scale, 0, Math.PI * 2);
+      ctx.arc(x + 30 * scale, y + 10 * scale, 24 * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawDonut(ctx, x, y, size, rotation, alpha, colorIndex = 0) {
+      const palette = FROSTING_COLORS[colorIndex % FROSTING_COLORS.length];
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      // Outer glow halo
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = palette.glow;
+      // Brown dough base
+      ctx.fillStyle = '#a16207';
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2, true);
+      ctx.fill();
+      // Frosting outer ring
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = palette.outer;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.97, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2, true);
+      ctx.fill();
+      // Frosting inner highlight
+      ctx.fillStyle = palette.inner;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.88, 0, Math.PI * 2);
+      ctx.arc(0, 0, size * 0.55, 0, Math.PI * 2, true);
+      ctx.fill();
+      // Sprinkles!
+      const sprinkles = ['#ef4444', '#3b82f6', '#facc15', '#10b981', '#a855f7', '#ffffff'];
+      for (let i = 0; i < 10; i++) {
+        const ang = (i / 10) * Math.PI * 2 + (colorIndex * 0.3);
+        const r = size * 0.72;
+        const sx = Math.cos(ang) * r;
+        const sy = Math.sin(ang) * r;
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(ang + 1);
+        ctx.fillStyle = sprinkles[(i + colorIndex) % sprinkles.length];
+        ctx.fillRect(-1.5, -size * 0.09, 3, size * 0.18);
+        ctx.restore();
+      }
+      // Tiny shine highlight on top-left for "glossy" feel
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.4, -size * 0.55, size * 0.18, size * 0.08, -0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    let _menuFrame = 0;
     function animateMenuBg() {
-      if (gameState.active) return; // Halt menu bg loop once playing
-
       menuBgCtx.clearRect(0, 0, menuBgCanvas.width, menuBgCanvas.height);
-      
-      menuParticles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
 
-        // Bounce bounds
-        if (p.x < 0 || p.x > window.innerWidth) p.vx *= -1;
-        if (p.y < 0 || p.y > window.innerHeight) p.vy *= -1;
+      // Keep the animation loop alive while playing, but do not leave stale donuts
+      // frozen behind/over UI when returning to the menu.
+      if (gameState.active) {
+        requestAnimationFrame(animateMenuBg);
+        return;
+      }
 
-        menuBgCtx.save();
-        menuBgCtx.globalAlpha = p.alpha;
-        menuBgCtx.fillStyle = p.color;
-        menuBgCtx.shadowBlur = 6;
-        menuBgCtx.shadowColor = p.color;
-        menuBgCtx.beginPath();
-        menuBgCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        menuBgCtx.fill();
-        menuBgCtx.restore();
+      _menuFrame++;
+
+      // === LAYER 1: parallax clouds drifting right ===
+      menuClouds.forEach(c => {
+        c.x += c.vx;
+        if (c.x > window.innerWidth + 100) c.x = -160;
+        drawCloud(menuBgCtx, c.x, c.y, c.scale, c.alpha);
       });
+
+      // === LAYER 2: ambient floating donuts (slow drift, blurred-back depth) ===
+      menuDonuts.forEach(d => {
+        d.x += d.vx;
+        d.y += d.vy;
+        d.rotation += d.rotSpeed;
+        if (d.x < -50) d.x = window.innerWidth + 50;
+        if (d.x > window.innerWidth + 50) d.x = -50;
+        if (d.y < -50) d.y = window.innerHeight + 50;
+        if (d.y > window.innerHeight + 50) d.y = -50;
+        drawDonut(menuBgCtx, d.x, d.y, d.size, d.rotation, d.alpha, d.colorIndex);
+      });
+
+      // === LAYER 3: FALLING DONUT RAIN from the sky ===
+      // Spawn a new one roughly every 18 frames (about 3 per second)
+      if (_menuFrame % 42 === 0) {
+        spawnFallingDonut();
+      }
+      // Update + draw + cull
+      for (let i = menuFallingDonuts.length - 1; i >= 0; i--) {
+        const d = menuFallingDonuts[i];
+        d.y += d.vy;
+        d.wobble += d.wobbleSpeed;
+        d.x += d.vx + Math.sin(d.wobble) * 0.4; // wobble horizontally as they fall
+        d.rotation += d.rotSpeed;
+        // Remove once well below screen
+        if (d.y > window.innerHeight + 80) {
+          menuFallingDonuts.splice(i, 1);
+          continue;
+        }
+        drawDonut(menuBgCtx, d.x, d.y, d.size, d.rotation, d.alpha, d.colorIndex);
+      }
+      // Cap how many falling donuts at once (avoid runaway memory if tab idle for hours)
+      if (menuFallingDonuts.length > 30) {
+        menuFallingDonuts.splice(0, menuFallingDonuts.length - 30);
+      }
 
       requestAnimationFrame(animateMenuBg);
     }
 
-    // Launch title stars
+    // Launch the Springfield sky
     initMenuBg();
 
   </script>
