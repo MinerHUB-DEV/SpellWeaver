@@ -1684,6 +1684,7 @@
             <button class="admin-btn" data-action="unlock-all-ach">🏅 Unlock All Achievements</button>
             <button class="admin-btn" data-action="boost-leaderboard">🏆 Boost My Leaderboard</button>
             <button class="admin-btn" data-action="reset-ach">🔄 Reset Achievements</button>
+            <button class="admin-btn" data-action="reset-bp">🎟️ Reset Battle Pass</button>
             <button class="admin-btn" data-action="reset-season">📅 Reset Season + LB Timer</button>
           </div>
         </div>
@@ -5662,10 +5663,11 @@
 
       // Try broadcasting via Firebase Realtime Database
       try {
-        if (window.firebaseReady && window.fbDb) {
-          const { ref, set } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js');
-          await set(ref(window.fbDb, 'liveEvent'), eventPayload);
-          statusEl.textContent = '✅ Event broadcasted to all players!';
+        if (window.firebaseReady && window.firebaseRtdb) {
+          // Use the already-imported ref/set from the top-level module
+          const { ref, set } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js');
+          await set(ref(window.firebaseRtdb, 'liveEvent'), eventPayload);
+          statusEl.textContent = '✅ Event broadcasted to ALL players globally!';
           statusEl.className = 'mt-2 text-center text-[10px] font-display py-2 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-300';
         } else {
           // Fallback: apply locally only
@@ -5676,7 +5678,7 @@
       } catch (err) {
         console.error('Live event broadcast failed:', err);
         handleLiveEvent(eventPayload); // still apply locally
-        statusEl.textContent = '⚠️ Broadcast error — applied locally';
+        statusEl.textContent = '⚠️ Broadcast error — applied locally. Error: ' + err.message;
         statusEl.className = 'mt-2 text-center text-[10px] font-display py-2 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300';
       }
       statusEl.classList.remove('hidden');
@@ -5812,22 +5814,61 @@
       requestAnimationFrame(tick);
     }
 
-    // Listen for live events from Firebase (if available)
+    // Listen for live events from Firebase Realtime Database (global broadcast)
     (async function initLiveEventListener() {
       let tries = 0;
-      while (!window.firebaseReady && tries < 30) { await new Promise(r => setTimeout(r, 300)); tries++; }
-      if (!window.fbDb) return;
+      while (!window.firebaseReady && tries < 40) { await new Promise(r => setTimeout(r, 300)); tries++; }
+      // Wait for RTDB specifically
+      let rtdbTries = 0;
+      while (!window.firebaseRtdb && rtdbTries < 20) { await new Promise(r => setTimeout(r, 500)); rtdbTries++; }
+      if (!window.firebaseRtdb) { console.warn('Live events: RTDB not available'); return; }
       try {
-        const { ref, onValue } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js');
-        const liveRef = ref(window.fbDb, 'liveEvent');
-        let lastEventTime = 0;
+        const { ref, onValue } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js');
+        const liveRef = ref(window.firebaseRtdb, 'liveEvent');
+        let lastEventTime = parseInt(localStorage.getItem('spellweaver_lastLiveEvent') || '0');
         onValue(liveRef, (snapshot) => {
           const event = snapshot.val();
           if (event && event.active && event.timestamp > lastEventTime) {
             lastEventTime = event.timestamp;
+            localStorage.setItem('spellweaver_lastLiveEvent', lastEventTime.toString());
+            console.log('🎬 Live event received:', event.type);
             handleLiveEvent(event);
           }
         });
+        console.log('🎬 Live event listener active on RTDB');
+
+        // Also listen for global Battle Pass resets
+        const bpResetRef = ref(window.firebaseRtdb, 'globalBpReset');
+        let lastBpReset = parseInt(localStorage.getItem('spellweaver_lastBpReset') || '0');
+        onValue(bpResetRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data && data.timestamp > lastBpReset) {
+            lastBpReset = data.timestamp;
+            localStorage.setItem('spellweaver_lastBpReset', lastBpReset.toString());
+            console.log('🎟️ Global BP reset received — wiping local Battle Pass');
+            // Save titles first
+            try {
+              const oldBp = JSON.parse(localStorage.getItem('spellweaver_battlepass') || '{}');
+              if (oldBp.titles && Array.isArray(oldBp.titles)) {
+                const vault = JSON.parse(localStorage.getItem('spellweaver_titles_vault') || '{"owned":[]}');
+                oldBp.titles.forEach(t => { if (t && !vault.owned.includes(t)) vault.owned.push(t); });
+                localStorage.setItem('spellweaver_titles_vault', JSON.stringify(vault));
+              }
+            } catch {}
+            // Wipe BP
+            localStorage.setItem('spellweaver_battlepass', JSON.stringify({
+              xp: 0, claimed: [], bonuses: { maxhp: 0, speed: 0, damage: 0, cooldown: 0, magnet: 0, startxp: 0 }, titles: []
+            }));
+            localStorage.setItem('spellweaver_s2_bp_reset_v2', Date.now().toString());
+            // Show notification
+            if (typeof showBpRewardNotif === 'function') showBpRewardNotif('🎟️ Battle Pass reset for Season 2!');
+            if (typeof renderBattlePass === 'function') renderBattlePass();
+            // Update badge
+            const badge = document.getElementById('bp-tier-badge');
+            if (badge) badge.textContent = 'T1';
+          }
+        });
+        console.log('🎟️ Global BP reset listener active');
       } catch (err) { console.warn('Live event listener failed:', err); }
     })();
 
@@ -5956,6 +5997,38 @@
             localStorage.removeItem('spellweaver_achievements');
             gameState.achievementsUnlocked = [];
             showAdminFeedback('🔄 Achievements reset', 'green');
+            break;
+          case 'reset-bp':
+            // Save titles first, then wipe BP
+            try {
+              const oldBp = JSON.parse(localStorage.getItem('spellweaver_battlepass') || '{}');
+              if (oldBp.titles && Array.isArray(oldBp.titles)) {
+                const vault = JSON.parse(localStorage.getItem('spellweaver_titles_vault') || '{"owned":[]}');
+                oldBp.titles.forEach(t => { if (t && !vault.owned.includes(t)) vault.owned.push(t); });
+                localStorage.setItem('spellweaver_titles_vault', JSON.stringify(vault));
+              }
+            } catch {}
+            localStorage.setItem('spellweaver_battlepass', JSON.stringify({
+              xp: 0, claimed: [], bonuses: { maxhp: 0, speed: 0, damage: 0, cooldown: 0, magnet: 0, startxp: 0 }, titles: []
+            }));
+            // Force re-trigger the reset flag so it doesn't auto-reset again
+            localStorage.setItem('spellweaver_s2_bp_reset_v2', Date.now().toString());
+            // Broadcast global BP reset to ALL players via RTDB
+            if (window.firebaseRtdb) {
+              (async () => {
+                try {
+                  const { ref, set } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js');
+                  await set(ref(window.firebaseRtdb, 'globalBpReset'), { timestamp: Date.now(), reason: 'Season 2 BP Reset' });
+                  showAdminFeedback('🎟️ Battle Pass wiped for ALL players globally!', 'green');
+                } catch (e) {
+                  showAdminFeedback('🎟️ Local BP wiped. Global broadcast failed: ' + e.message, 'amber');
+                }
+              })();
+            } else {
+              showAdminFeedback('🎟️ Battle Pass wiped locally — Firebase offline', 'amber');
+            }
+            // Refresh the BP UI if open
+            if (typeof renderBattlePass === 'function') renderBattlePass();
             break;
           case 'reset-season':
             // Reset season globally via Firestore (everyone sees new countdown)
@@ -6226,6 +6299,36 @@
         }
         // Mark this client as having launched S2 so we don't loop reset
         localStorage.setItem(SEASON_2_FLAG, Date.now().toString());
+      }
+
+      // 🍩 SEASON 2 BATTLE PASS RESET: wipe old S1 BP progress but keep titles
+      const S2_BP_RESET_FLAG = 'spellweaver_s2_bp_reset_v2';
+      if (!localStorage.getItem(S2_BP_RESET_FLAG)) {
+        console.log('🍩 Resetting Battle Pass for Season 2...');
+        // Step 1: Save any earned titles to the permanent vault BEFORE wiping
+        try {
+          const oldBp = JSON.parse(localStorage.getItem('spellweaver_battlepass') || '{}');
+          if (oldBp.titles && Array.isArray(oldBp.titles) && oldBp.titles.length > 0) {
+            const vault = JSON.parse(localStorage.getItem('spellweaver_titles_vault') || '{"owned":[]}');
+            oldBp.titles.forEach(t => {
+              if (t && !vault.owned.includes(t)) vault.owned.push(t);
+            });
+            localStorage.setItem('spellweaver_titles_vault', JSON.stringify(vault));
+            console.log('🎖️ Preserved', oldBp.titles.length, 'title(s) from Season 1');
+          }
+        } catch (e) { console.warn('Title migration failed:', e); }
+
+        // Step 2: Wipe battle pass completely — fresh start for Season 2
+        localStorage.setItem('spellweaver_battlepass', JSON.stringify({
+          xp: 0,
+          claimed: [],
+          bonuses: { maxhp: 0, speed: 0, damage: 0, cooldown: 0, magnet: 0, startxp: 0 },
+          titles: []
+        }));
+        console.log('✅ Battle Pass reset to Tier 1 for Season 2');
+
+        // Step 3: Mark as done so it never runs again
+        localStorage.setItem(S2_BP_RESET_FLAG, Date.now().toString());
       }
 
       await fetchGlobalSeasonStart();
